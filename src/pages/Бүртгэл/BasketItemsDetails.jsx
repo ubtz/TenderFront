@@ -11,23 +11,26 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
 
     const userJson = localStorage.getItem("data");
     const user = userJson ? JSON.parse(userJson) : null;
-
     const isUdirdlaga =
-        user?.erh?.toLowerCase() === "удирдлага" ||
-        user?.permission === "удирдлага";
+        user?.erh?.toLowerCase() === "Удирдлага";
 
     // ✅ Fetch branches once
     useEffect(() => {
         const fetchBranches = async () => {
+            const cached = sessionStorage.getItem("branches");
+            if (cached) return setBranches(JSON.parse(cached));
+
             try {
                 const res = await axios.get(`${API_BASE_URL}/get/branches`);
                 setBranches(res.data || []);
+                sessionStorage.setItem("branches", JSON.stringify(res.data || []));
             } catch (err) {
                 console.error("❌ Branches fetch error:", err);
             }
         };
         fetchBranches();
     }, []);
+
 
     // ✅ Helper: map shortName to "service (shortName)"
     const getServiceByShortName = (shortName) => {
@@ -37,15 +40,17 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
 
     // ✅ Fetch basket items
     useEffect(() => {
-        if (!basketIds) return;
-        fetchBasketItems(basketIds);
+        if (!basketIds?.length) return;
+        fetchBasketItems(Array.isArray(basketIds) ? basketIds.join(",") : basketIds);
     }, [basketIds]);
+
 
     const fetchBasketItems = async (ids) => {
         setLoading(true);
         try {
             const res = await axios.get(`${API_BASE_URL}/get/GetBasketItemsById/${ids}`);
             setItems(res.data || []);
+            console.log("✅ Fetched basket items:", res.data);
         } catch (err) {
             console.error("❌ Error fetching basket items:", err);
             message.error("Сагсны өгөгдөл авахад алдаа гарлаа.");
@@ -174,24 +179,20 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             align: "right",
             render: (v) => v?.toLocaleString(),
         },
-        ...(mode === "plan"
-            ? [
-                {
-                    title: "Үнэ",
-                    dataIndex: "price",
-                    key: "price",
-                    align: "right",
-                    render: (v) => (v ? v.toLocaleString() + " ₮" : ""),
-                },
-                {
-                    title: "Нийт үнэ",
-                    dataIndex: "pricesum",
-                    key: "pricesum",
-                    align: "right",
-                    render: (v) => (v ? v.toLocaleString() + " ₮" : ""),
-                },
-            ]
-            : []),
+        {
+            title: "Үнэ",
+            dataIndex: "price",
+            key: "price",
+            align: "right",
+            render: (v) => (v != null ? v.toLocaleString() + " ₮" : ""),
+        },
+        {
+            title: "Нийт үнэ",
+            dataIndex: "pricesum",
+            key: "pricesum",
+            align: "right",
+            render: (v) => (v != null ? v.toLocaleString() + " ₮" : ""),
+        },
     ];
 
     // ✅ Extra editable columns (only for geree mode, not for удирдлага)
@@ -202,67 +203,156 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
                 dataIndex: "isArrived",
                 key: "isArrived",
                 align: "center",
-                render: (value, record) => (
-                    <Checkbox
-                        checked={!!value}
-                        disabled={isUdirdlaga}
-                        onChange={async (e) => {
-                            if (isUdirdlaga) return;
-                            const checked = e.target.checked;
-                            const updated = items.map((it) =>
-                                it.basket_item_id === record.basket_item_id
-                                    ? { ...it, isArrived: checked }
-                                    : it
-                            );
-                            setItems(updated);
+                render: (value, record) => {
+                    // parse arrival info (array)
+                    const arrivalList = (() => {
+                        try {
+                            return JSON.parse(record.tailbar || "[]");
+                        } catch {
+                            return [];
+                        }
+                    })();
 
+                    const totalArrived = arrivalList.reduce(
+                        (sum, a) => sum + (Number(a.qty) || 0),
+                        0
+                    );
+
+                    const isFullyArrived = totalArrived >= Number(record.qty || 0);
+
+                    // auto-update if needed
+                    if (isFullyArrived && !record.isArrived) {
+                        (async () => {
                             try {
                                 await axios.put(`${API_BASE_URL}/put/basketitem/state`, {
                                     basket_item_id: record.basket_item_id,
-                                    isArrived: checked,
+                                    isArrived: true,
                                 });
-                                console.log("✅ isArrived updated successfully");
+                                record.isArrived = true;
                             } catch (err) {
-                                console.error("❌ Failed to update isArrived:", err);
+                                console.error("❌ Auto update isArrived failed:", err);
                             }
-                        }}
-                    />
-                ),
+                        })();
+                    }
+
+                    return (
+                        <Checkbox
+                            checked={isFullyArrived || !!value}
+                            disabled={true} // auto-calculated
+                        />
+                    );
+                },
             },
             {
-                title: "Тайлбар",
+                title: "Ирсэн мэдээлэл",
                 dataIndex: "tailbar",
                 key: "tailbar",
-                render: (value, record) => (
-                    <Input
-                        value={value}
-                        placeholder="Тайлбар оруулна уу"
-                        disabled={isUdirdlaga}
-                        onChange={async (e) => {
-                            if (isUdirdlaga) return;
-                            const newValue = e.target.value;
-                            const updated = items.map((it) =>
-                                it.basket_item_id === record.basket_item_id
-                                    ? { ...it, tailbar: newValue }
-                                    : it
-                            );
-                            setItems(updated);
+                render: (value, record) => {
+                    const arrivalList = (() => {
+                        try {
+                            return JSON.parse(value || "[]");
+                        } catch {
+                            return [];
+                        }
+                    })();
 
-                            try {
-                                await axios.put(`${API_BASE_URL}/put/basketitem/state`, {
-                                    basket_item_id: record.basket_item_id,
-                                    tailbar: newValue,
-                                });
-                                console.log("✅ Tailbar updated successfully");
-                            } catch (err) {
-                                console.error("❌ Failed to update tailbar:", err);
-                            }
-                        }}
-                    />
-                ),
+                    const handleUpdate = async (newList) => {
+                        const updated = items.map((it) =>
+                            it.basket_item_id === record.basket_item_id
+                                ? { ...it, tailbar: JSON.stringify(newList) }
+                                : it
+                        );
+                        setItems(updated);
+                        try {
+                            await axios.put(`${API_BASE_URL}/put/basketitem/state`, {
+                                basket_item_id: record.basket_item_id,
+                                tailbar: JSON.stringify(newList),
+                            });
+                        } catch (err) {
+                            console.error("❌ Failed to update arrivals:", err);
+                        }
+                    };
+
+                    const addNew = () => handleUpdate([...arrivalList, { qty: 0, date: null }]);
+
+                    const updateField = (idx, key, value) => {
+                        const newList = arrivalList.map((a, i) =>
+                            i === idx ? { ...a, [key]: value } : a
+                        );
+                        handleUpdate(newList);
+                    };
+
+                    const removeField = (idx) =>
+                        handleUpdate(arrivalList.filter((_, i) => i !== idx));
+
+                    const totalArrived = arrivalList.reduce(
+                        (sum, a) => sum + (Number(a.qty) || 0),
+                        0
+                    );
+
+                    return (
+                        <div>
+                            {arrivalList.map((a, idx) => (
+                                <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        value={a.qty}
+                                        placeholder="Тоо"
+                                        disabled={isUdirdlaga}
+                                        onChange={(e) =>
+                                            updateField(idx, "qty", Number(e.target.value))
+                                        }
+                                        style={{ width: 80 }}
+                                    />
+                                    <Input
+                                        type="date"
+                                        value={a.date || ""}
+                                        disabled={isUdirdlaga}
+                                        onChange={(e) => updateField(idx, "date", e.target.value)}
+                                        style={{ width: 150 }}
+                                    />
+                                    {!isUdirdlaga && (
+                                        <button
+                                            onClick={() => removeField(idx)}
+                                            style={{
+                                                background: "none",
+                                                border: "none",
+                                                color: "red",
+                                                cursor: "pointer",
+                                            }}
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                            {!isUdirdlaga && (
+                                <button
+                                    onClick={addNew}
+                                    style={{
+                                        background: "#f0f0f0",
+                                        border: "1px dashed #ccc",
+                                        borderRadius: 4,
+                                        padding: "2px 8px",
+                                        cursor: "pointer",
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    ➕ Нэмэх
+                                </button>
+                            )}
+                            <div style={{ marginTop: 4, fontSize: 12, color: "#555" }}>
+                                Нийт ирсэн: <b>{totalArrived.toLocaleString()}</b> /{" "}
+                                <b>{record.qty?.toLocaleString()}</b>
+                            </div>
+                        </div>
+                    );
+                },
             }
         );
     }
+
 
     // ✅ Expanded row
     const expandedRowRender = (record) => (
