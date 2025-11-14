@@ -1,0 +1,64 @@
+:root {
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  padding: 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+  align-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  font-size: 1.6rem;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+h2 {
+  text-align: center;
+}
+
+a {
+  font-weight: 500;
+  color: blue;
+  text-decoration: inherit;
+  padding: 1rem 1.5rem;
+}
+
+a:hover,
+.nav-active {
+  color: white;
+}
+
+p {
+  max-width: 60ch;
+  margin: 0 auto;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* main nav */
+.main-navigation {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+/* profiles */
+.profiles {
+  display: flex;
+  gap: 3rem;
+  & .profiles-links {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+}
