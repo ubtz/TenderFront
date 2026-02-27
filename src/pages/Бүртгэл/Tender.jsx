@@ -257,13 +257,7 @@ const Tender = () => {
         const percent = calcCompletion(record, mode);
         const isFinished = percent === 100;
         console.log(`Progress for ${record.tender_id} (${mode}):`, { percent, isFinished });
-        useEffect(() => {
-            const timer = setInterval(() => {
-                const now = dayjs();
-                Math.min(100, Math.max(0, (now.diff(start) / totalMs) * 100));
-            }, 1000);
-            return () => clearInterval(timer);
-        }, [start, totalMs]);
+      
         const orgs = [
             ...new Set(record.Organization.split(",").map(o => o.trim()))
         ];
@@ -355,60 +349,7 @@ const Tender = () => {
         const [users, setUsers] = useState([]);
         const [selectedUser, setSelectedUser] = useState(null);
         const [selectedOrg, setSelectedOrg] = useState(null);
-        const menu = (
-            <Menu
-                onClick={async (e) => {
-                    try {
-                        setSelected(e.key);
-                        message.loading({ content: "Гэрээ үүсгэж байна...", key: "ger" });
-                        console.log("record:", record);
-                        // 🔥 API руу record + сонгосон утга илгээж байна
-                        const payload = {
-                            TenderId: record.tender_id, // тендерийн ID
-                            Гэрээний_дугаар: `GR-${Date.now()}`, // түр гэрээний дугаар жишээ болгож үүсгэв
-                            Гэрээ_байгуулсан_огноо: new Date().toISOString(),
-                            Гэрээ_байгуулсан_ААН: selectedOrg, // сонгосон байгууллага
-                            ААН_регистер: record.ААН_регистер || "",
-                            Хүчинтэй_хугацаа: record.Хүчинтэй_хугацаа || "",
-                            Валют: record.Валют || "MNT",
-                            Гэрээний_дүн: record.Гэрээний_дүн || 0,
-                            Төлбөрийн_нөхцөл: record.Төлбөрийн_нөхцөл || "",
-                            Төлбөрийн_огноо: record.Төлбөрийн_огноо || null,
-                            Төлбөр_хийх_хугацаа: record.Төлбөр_хийх_хугацаа || null,
-                            Нийлүүлэх_нөхцөл: record.Нийлүүлэх_нөхцөл || "",
-                            Нийлүүлэх_хугацаа: record.Нийлүүлэх_хугацаа || null,
-                            Алдангийн_нөхцөл: record.Алдангийн_нөхцөл || "",
-                            Гэрээ_хэрэгжилтийн_явц: record.Гэрээ_хэрэгжилтийн_явц || "",
-                            Тодруулга: record.Тодруулга || "",
-                            Дүгнэлт: record.Дүгнэлт || "",
-                            Санамж: record.Санамж || "",
-                            Гэрээний_төлөв: "ШИНЭ", // default
-                            BasketIds: record.basket_ids || "", // сагсны ID-үүд
-                            GereeUserId: selectedUser,
-                        };
 
-                        console.log("📤 Sending payload:", payload);
-
-                        await axios.post(`${API_BASE_URL}/post/PostGeree`, payload);
-
-                        message.success({
-                            content: `${e.key} гэрээ амжилттай үүсгэгдлээ`,
-                            key: "ger",
-                        });
-                    } catch (err) {
-                        console.error("❌ Failed to create Geree:", err);
-                        message.error({
-                            content: "Гэрээ үүсгэхэд алдаа гарлаа",
-                            key: "ger",
-                        });
-                    }
-                }}
-            >
-                {choices.map((org) => (
-                    <Menu.Item key={org}>{org}</Menu.Item>
-                ))}
-            </Menu>
-        );
         return (
 
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
@@ -749,12 +690,6 @@ const Tender = () => {
 
     return (
         <>
-            {/* <Input
-                placeholder="Хайх..."
-                allowClear
-                onChange={(e) => setSearchText(e.target.value)}
-                style={{ maxWidth: 300, marginBottom: 8 }}
-            /> */}
             <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
                 <Button
                     type={filterType === "normal" ? "primary" : "default"}
@@ -791,19 +726,6 @@ const Tender = () => {
                 ))}
             </div>
 
-
-            {/* Month filter */}
-            {/* <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-                    <Button
-                        key={month}
-                        type={selectedMonth === month ? "primary" : "default"}
-                        onClick={() => setSelectedMonth(month)}
-                    >
-                        {month}
-                    </Button>
-                ))}
-            </div> */}
             <Table
                 dataSource={filteredData}
                 columns={columns}
@@ -1083,9 +1005,6 @@ const Tender = () => {
                 })}
                 pagination={true}
             />
-
-
-
             {/* 🚀 Modal */}
             <Modal
                 title="Түтгэлзүүлэх огноо оруулах"

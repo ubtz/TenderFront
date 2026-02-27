@@ -78,7 +78,7 @@ function Nav() {
         { key: "add-file", label: <Link to="/Upload_Баримт">Файл нэмэх</Link> },
       ],
     },
-    { key: "view", label: "Явцын мэдээлэл" },
+    { key: "view", label: <Link to="/ЯвцMain">Явцын мэдээлэл</Link> },
     {
       key: "registration",
       label: "Захиалга",
@@ -113,7 +113,7 @@ function Nav() {
         // { key: "add-file", label: <Link to="/Upload_Баримт">Файл нэмэх</Link> },
       ],
     },
-    { key: "view", label: "Явцын мэдээлэл" },
+    { key: "view", label: <Link to="/ЯвцMain">Явцын мэдээлэл</Link> },
     {
       key: "registration",
       label: "Захиалга",
@@ -143,7 +143,7 @@ function Nav() {
         // { key: "add-file", label: <Link to="/Upload_Баримт">Файл нэмэх</Link> },
       ],
     },
-    { key: "view", label: "Явцын мэдээлэл" },
+    { key: "view", label: <Link to="/ЯвцMain">Явцын мэдээлэл</Link> },
     {
       key: "contract",
       icon: <BarChartOutlined />,

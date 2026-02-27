@@ -26,51 +26,58 @@ const PrintIcon = ({ normData, planId, UserId }) => {
 
   };
   const handleOk = async () => {
-    try {
-      const values = await form.validateFields();
-      console.log("✅ Form submitted:", values);
+    if (user?.id === UserId) {
+      try {
+        const values = await form.validateFields();
+        console.log("✅ Form submitted:", values);
 
-      // 1. Arrays → string (label name)
-      const modStr = (values.Mod || [])
-        .map(item => `${item.label}: ${item.name}`)
-        .join(", ");
+        // 1. Arrays → string (label name)
+        const modStr = (values.Mod || [])
+          .map(item => `${item.label}: ${item.name}`)
+          .join(", ");
 
-      const approvedStr = (values.approved || [])
-        .map(item => `${item.label}: ${item.name}`)
-        .join(", ");
+        const approvedStr = (values.approved || [])
+          .map(item => `${item.label}: ${item.name}`)
+          .join(", ");
 
-      const executedStr = (values.executed || [])
-        .map(item => `${item.label}: ${item.name}`)
-        .join(", ");
+        const executedStr = (values.executed || [])
+          .map(item => `${item.label}: ${item.name}`)
+          .join(", ");
 
-      // 2. Get logged-in user ID
-      const userId = user?.id || null;
+        // 2. Get logged-in user ID
+        const userId = user?.id || null;
 
-      // 3. Prepare payload (added userId)
-      const payload = {
-        planRootNumber: planId,
-        batlah: modStr,
-        zuvshuursun: approvedStr,
-        guitsetgesen: executedStr,
-        userId: userId, // ✅ Added here
-      };
+        // 3. Prepare payload (added userId)
+        const payload = {
+          planRootNumber: planId,
+          batlah: modStr,
+          zuvshuursun: approvedStr,
+          guitsetgesen: executedStr,
+          userId: userId, // ✅ Added here
+        };
 
-      console.log("📤 Payload:", payload);
+        console.log("📤 Payload:", payload);
 
-      setLoading(true);
-      await axios.post(`${API_BASE_URL}/post/PostExecTeam`, payload);
+        setLoading(true);
+        await axios.post(`${API_BASE_URL}/post/PostExecTeam`, payload);
 
-      message.success("✅ ExecTeam амжилттай нэмэгдлээ");
+        message.success("✅ ExecTeam амжилттай нэмэгдлээ");
 
-      setIsModalVisible(false);
-      form.resetFields();
-      generatePDF(normData, payload);
-    } catch (err) {
-      console.error("❌ handleOk error:", err);
-      message.error("❌ Хадгалах үед алдаа гарлаа");
-    } finally {
-      setLoading(false);
+        setIsModalVisible(false);
+        form.resetFields();
+        generatePDF(normData, payload);
+      } catch (err) {
+        console.error("❌ handleOk error:", err);
+        message.error("❌ Хадгалах үед алдаа гарлаа");
+      } finally {
+        setLoading(false);
+      }
     }
+    else {
+      generatePDF(normData, "");
+      setIsModalVisible(false);
+    }
+
   };
 
 
@@ -150,15 +157,15 @@ const PrintIcon = ({ normData, planId, UserId }) => {
     //   .join("\n");
 
     const row1 = payload.batlah
-      .split(",")
+      ?.split(",")
       .map(s => s.trim().replace(":", "                      ")) // ":"-ийг устгаад зай орлуулна
       .join("\n");
     const row2 = payload.guitsetgesen
-      .split(",")
+      ?.split(",")
       .map(s => s.trim().replace(":", "                      ")) // ":"-ийг устгаад зай орлуулна
       .join("\n");
     const row3 = payload.zuvshuursun
-      .split(",")
+      ?.split(",")
       .map(s => s.trim().replace(":", "                      ")) // ":"-ийг устгаад зай орлуулна
       .join("\n");
     console.log("row1row1row1", row1);

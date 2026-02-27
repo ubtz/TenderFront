@@ -95,6 +95,7 @@ const MyModalWithTable = ({
                         title: item.basket_type || typeKey,
                         type: "type",
                         plan_root_number: item.plan_root_number,
+                        plan_name: item.plan_name,
                         basket_type: item.basket_type,
                         icon: <FolderOutlined style={{ color: "#52c41a" }} />,
                         children: [],
@@ -361,7 +362,7 @@ const MyModalWithTable = ({
                 const payload = {
                     planName: node.title,
                     planRootNumber: node.plan_root_number,
-                    basketType: "Шинэ ангилал",
+                    basketType: "Ангилал",
                     basketName: "Шинэ багц",
                     basketNumber: 1,
                     publishDate: today,
@@ -372,8 +373,9 @@ const MyModalWithTable = ({
             }
 
             if (node.type === "type") {
+
                 const payload = {
-                    planName: node.title,
+                    planName: node.plan_name,
                     planRootNumber: node.plan_root_number,
                     basketType: node.basket_type,
                     basketName: "Шинэ багц",
@@ -381,6 +383,7 @@ const MyModalWithTable = ({
                     publishDate: today,
                     setDate: nextWeek,
                 };
+                console.log("ENE AJILLAA", node);
                 await postBasket(payload);
                 return;
             }

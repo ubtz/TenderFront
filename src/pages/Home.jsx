@@ -17,6 +17,7 @@ import {
   RiseOutlined,
   DollarCircleOutlined,
 } from "@ant-design/icons";
+import { useNavigate } from "react-router-dom";
 
 import GovLogo from "../assets/Gov_Logo.png";
 import GovLogoTender from "../assets/Gov_Tender_logo.png";
@@ -104,6 +105,7 @@ export default function Home() {
   const [loadingStats, setLoadingStats] = useState(true);
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   const pieData = useMemo(() => PIE_DATASETS[scope], [scope]);
+  const navigate = useNavigate();
   useEffect(() => {
     const fetchStatistics = async () => {
       try {
@@ -362,6 +364,11 @@ export default function Home() {
                   transition: "all 0.3s ease",
                   cursor: "pointer",
                 }}
+                onClick={() =>
+                  navigate("/Явц1", {
+                    state: { activeStepKey: "request" },
+                  })
+                }
                 hoverable
                 styles={{ body: { padding: "22px 26px" } }}
                 onMouseEnter={(e) => {
@@ -400,6 +407,11 @@ export default function Home() {
                   transition: "all 0.3s ease",
                   cursor: "pointer",
                 }}
+                onClick={() =>
+                  navigate("/Явц1", {
+                    state: { activeStepKey: "tender" },
+                  })
+                }
                 hoverable
                 styles={{ body: { padding: "22px 26px" } }}
                 onMouseEnter={(e) => {
@@ -438,6 +450,11 @@ export default function Home() {
                   transition: "all 0.3s ease",
                   cursor: "pointer",
                 }}
+                onClick={() =>
+                  navigate("/Явц1", {
+                    state: { activeStepKey: "contract" },
+                  })
+                }
                 hoverable
                 styles={{ body: { padding: "22px 26px" } }}
                 onMouseEnter={(e) => {

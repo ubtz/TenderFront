@@ -36,7 +36,7 @@ const AddBasketModal = ({ open, onCancel }) => {
     const [loading, setLoading] = useState(false);
 
     const user = JSON.parse(localStorage.getItem("data") || "{}");
-    const API_BASE = "http://172.30.30.30:3636";
+    const API_BASE = import.meta.env.VITE_API_URL;
 
     /** 🔁 Fetch data from API */
     const fetchTreeData = async () => {
@@ -200,7 +200,7 @@ const AddBasketModal = ({ open, onCancel }) => {
                 userId: user.id,
                 planName: node.title,
                 planRootNumber: node.plan_root_number,
-                basketType: "Шинэ ангилал",
+                basketType: "Шинэ ",
                 basketName: "Шинэ багц",
                 basketNumber: 1,
                 publishDate: today,

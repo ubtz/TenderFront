@@ -35,7 +35,6 @@ const GereeModal = ({ visible, record, onClose, user, handleUpdate }) => {
   const [loadingReg, setLoadingReg] = useState(false);
   const [apiToken, setApiToken] = useState(null);
 
-
   const [localRecord, setLocalRecord] = useState(record);
 
   useEffect(() => {

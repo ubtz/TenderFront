@@ -15,9 +15,6 @@ function ТөлөвлөгөөTable() {
     const [columnFilters, setColumnFilters] = useState({});
 
     const API_BASE_URL = import.meta.env.VITE_API_URL;
-    const [newQty, setNewQty] = useState("");
-    const [newPrice, setNewPrice] = useState("");
-    const [dataSource, setDataSource] = useState(data);
     const [modalVisible, setModalVisible] = useState(false);
     const [currentRecord, setCurrentRecord] = useState(null);
     const [tenderNumber, setTenderNumber] = useState("");
@@ -30,6 +27,8 @@ function ТөлөвлөгөөTable() {
     const [userinfo, setUser] = useState(null); // currently logged-in user
     const [expandedRowKeys, setExpandedRowKeys] = useState([]);
     const [expandedBasketKeys, setExpandedBasketKeys] = useState([]);
+    const [lockedBasketIds, setLockedBasketIds] = useState([]);
+    const [basketTenderMap, setBasketTenderMap] = useState({});
 
     useEffect(() => {
         // get logged-in user (from localStorage, etc.)
@@ -51,7 +50,7 @@ function ТөлөвлөгөөTable() {
     const getUsernameById = (id) => {
         const u = usersinfo.find((usr) => usr.id === id || usr.user_id === id);
         // console.log("Getting username for ID:", id, "=>", u);
-
+        // console.log("Getting username for ID:", usersinfo, id);
         if (!u) return "—";
 
         // Prefer username if available, otherwise fallback to full name
@@ -60,17 +59,47 @@ function ТөлөвлөгөөTable() {
             : `${u.ovog || ""} ${u.ner || ""}`.trim() || "—";
     };
     // Open modal
-    const handleCreateTender = (record) => {
-        console.log("Creating tender for plan:", record);
+    const handleCreateTender = async (record) => {
         setCurrentRecord(record);
-        setTenderNumber(""); // reset input
-        setSelectedBaskets([]); // reset checkboxes
+        setTenderNumber("");
+        setSelectedBaskets([]);
+        setLockedBasketIds([]); // reset
+
+
+        try {
+            const res = await axios.get(
+                `${API_BASE_URL}/get/GetBasketIdsByRootNum/${record.plan_root_number}`
+            );
+            setBasketTenderMap(res.data?.basketTenderMap || {});
+            setLockedBasketIds(res.data?.basketIds || []);
+        } catch (err) {
+            console.error("❌ Failed to load locked baskets:", err);
+        }
+
         setModalVisible(true);
-        console.log("selectedBaskets:", selectedBaskets);
     };
+
 
     // Save tender
     const handleSaveTender = async () => {
+        if (!tenderNumber) {
+            message.warning("Тендерийн дугаар оруулна уу!");
+            return;
+        }
+
+        if (selectedBaskets.length === 0) {
+            message.warning("Багц сонгоно уу!");
+            return;
+        }
+
+        const invalid = selectedBaskets.some(
+            id => lockedBasketIds.includes(id)
+        );
+
+        if (invalid) {
+            message.error("Зарим багц аль хэдийн тендерт орсон байна!");
+            return;
+        }
         console.log("selectedBaskets:", selectedBaskets);
         if (!tenderNumber) {
             message.warning("Тендерийн дугаар оруулна уу!");
@@ -279,48 +308,7 @@ function ТөлөвлөгөөTable() {
         return result;
     }, [data, searchText, columnFilters]);
 
-    // -------------------- Global Search --------------------
-    const handleGlobalSearch = (e) => {
-        const value = e.target.value;
-        setSearchText(value);
-        if (!value) {
-            // setFilteredData(data);
-            return;
-        }
-        const lowerValue = value.toLowerCase();
 
-        const filtered = data
-            .map((plan) => {
-                const filteredBaskets = plan.baskets
-                    .map((basket) => {
-                        const filteredItems = basket.items.filter((item) =>
-                            Object.values(item).some((val) =>
-                                val?.toString().toLowerCase().includes(lowerValue)
-                            )
-                        );
-                        const basketMatch = Object.values(basket).some((val) =>
-                            val?.toString().toLowerCase().includes(lowerValue)
-                        );
-                        if (filteredItems.length > 0 || basketMatch) {
-                            return { ...basket, items: filteredItems };
-                        }
-                        return null;
-                    })
-                    .filter(Boolean);
-
-                const planMatch = Object.values(plan).some((val) =>
-                    val?.toString().toLowerCase().includes(lowerValue)
-                );
-
-                if (filteredBaskets.length > 0 || planMatch) {
-                    return { ...plan, baskets: filteredBaskets };
-                }
-                return null;
-            })
-            .filter(Boolean);
-
-        // setFilteredData(filtered);
-    };
     const renderColumnHeaderWithSearch = (title, dataIndex) => (
         <div
             style={{ display: "flex", flexDirection: "column" }}
@@ -496,13 +484,6 @@ function ТөлөвлөгөөTable() {
 
     return (
         <>
-            {/* <Input
-                placeholder="Хайлт..."
-                value={searchText}
-                onChange={handleGlobalSearch}
-                style={{ width: 300, marginBottom: 16 }}
-                allowClear
-            /> */}
             <Table
                 columns={planColumns}
                 dataSource={filteredData}
@@ -556,8 +537,18 @@ function ТөлөвлөгөөTable() {
                     onChange={(checkedValues) => setSelectedBaskets(checkedValues)}
                 >
                     {currentRecord?.baskets?.map((b) => (
-                        <Checkbox key={b.basket_id} value={b.basket_id}>
+                        <Checkbox
+                            key={b.basket_id}
+                            value={b.basket_id}
+                            disabled={lockedBasketIds.includes(b.basket_id)}
+                        >
                             {b.basket_name} — {b.total_price?.toLocaleString()}₮
+
+                            {lockedBasketIds.includes(b.basket_id) && (
+                                <span style={{ color: "red", marginLeft: 8 }}>
+                                    (Тендерт орсон: {basketTenderMap[b.basket_id]})
+                                </span>
+                            )}
                         </Checkbox>
                     ))}
                 </Checkbox.Group>

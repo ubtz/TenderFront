@@ -27,9 +27,16 @@ import Багцлах from "./pages/Бүртгэл/Багцлах";
 import PrivateRoute from "./components/PrivateRoute";
 import Tender_Бүртгэх from "./pages/Бүртгэл/Tender_Бүртгэх";
 import Гэрээ_Бүртгэх from "./pages/Бүртгэл/Гэрээ_бүртгэх";
-import Tender from "./pages/Бүртгэл/Tender";
+import Tender from "./pages/Tender/Tender";
+import Tender2 from "./pages/Бүртгэл/Tender";
+
 import Profile from "./pages/Login/Profile";
 import UsersPanel from "./pages/Login/UsersPanel";
+import InventoryReportForm from "./pages/Бүртгэл/InventoryReportForm";
+import Явц1 from "./pages/Бүртгэл/Явц1";
+import Явц2 from "./pages/Бүртгэл/Явц2";
+import ЯвцMain from "./pages/Бүртгэл/ЯвцMain";
+
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
 
@@ -124,6 +131,32 @@ function App() {
                 element={
                   <PrivateRoute>
                     <Home />
+                  </PrivateRoute>
+                }
+              />
+
+              {/* Common routes (for all roles) */}
+              <Route
+                path="/Явц1"
+                element={
+                  <PrivateRoute>
+                    <Явц1 />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/Явц2"
+                element={
+                  <PrivateRoute>
+                    <Явц2 />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/ЯвцMain"
+                element={
+                  <PrivateRoute>
+                    <ЯвцMain />
                   </PrivateRoute>
                 }
               />
@@ -267,6 +300,14 @@ function App() {
                       </PrivateRoute>
                     }
                   />
+                   <Route
+                    path="/Tender2"
+                    element={
+                      <PrivateRoute>
+                        <Tender2 />
+                      </PrivateRoute>
+                    }
+                  />
                   <Route
                     path="/Багцлах"
                     element={
@@ -291,6 +332,15 @@ function App() {
                       </PrivateRoute>
                     }
                   />
+                  <Route
+                    path="/InventoryReportForm"
+                    element={
+                      <PrivateRoute>
+                        <InventoryReportForm />
+                      </PrivateRoute>
+                    }
+                  />
+
                 </>
               )}
 

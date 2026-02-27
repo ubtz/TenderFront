@@ -46,22 +46,31 @@ const Багцлах = () => {
     // ✅ Fetch and merge data efficiently
     const fetchData = useCallback(
         async (yy = activeYear, mm, man = String(user?.code || "")) => {
-            if (fetchedMonths.current.has(`${yy}-${mm}`)) return; // avoid duplicate month fetch
-            fetchedMonths.current.add(`${yy}-${mm}`);
+
+            const monthKey = `${yy}-${mm}`;
+
+            // ⛔ already fetched successfully → skip
+            if (fetchedMonths.current.has(monthKey)) return;
 
             setLoading(true);
-            let validToken = token || (await fetchToken());
-            if (!validToken) {
-                setLoading(false);
-                return;
-            }
+
+            let validToken = token;
 
             try {
-                // 🔹 Local API (basket data)
+                // 1️⃣ ensure token
+                if (!validToken) {
+                    validToken = await fetchToken();
+                    if (!validToken) throw new Error("Token not received");
+                }
+
+                // 2️⃣ get basket (local API)
                 const basketRes = await axios.get(`${API_BASE_URL}/get/Items`);
                 const basketItems = basketRes.data || [];
                 const userId = user.id;
-                const filteredItems = basketItems.filter((item) => item.userId === userId);
+
+                const filteredItems = basketItems.filter(
+                    (item) => item.userId === userId
+                );
 
                 const basketKeys = new Set(
                     filteredItems.map(
@@ -74,41 +83,78 @@ const Багцлах = () => {
                     )
                 );
 
-                // 🔹 External API (order data)
-                const ordersRes = await axios.post("http://192.168.4.107:8008/v1/orders/list", {
-                    Yy: yy,
-                    Mm: mm,
-                    Man: man,
-                    Token: validToken,
-                });
-                console.log("Orders response:", ordersRes.data);
+                // 3️⃣ call orders API
+                let ordersRes = await axios.post(
+                    "http://192.168.4.107:8008/v1/orders/list",
+                    {
+                        Yy: yy,
+                        Mm: mm,
+                        Man: man,
+                        Token: validToken,
+                    }
+                );
+
+                // 🔁 token invalid → retry once
+                if (ordersRes.data?.message === "Token incorrect!") {
+                    validToken = await fetchToken();
+                    if (!validToken) throw new Error("Token refresh failed");
+
+                    ordersRes = await axios.post(
+                        "http://192.168.4.107:8008/v1/orders/list",
+                        {
+                            Yy: yy,
+                            Mm: mm,
+                            Man: man,
+                            Token: validToken,
+                        }
+                    );
+                }
+
+                if (!ordersRes.data?.status) {
+                    throw new Error(ordersRes.data?.message || "Orders API error");
+                }
+
+                // ✅ mark month as successfully fetched
+                fetchedMonths.current.add(monthKey);
+
+                // 4️⃣ filter out basket items
                 let orders = ordersRes.data.records || [];
+                console.log("Fetched orders:", ordersRes);
                 orders = orders.filter((order) => {
                     const key = `${String(order.code).trim()}-${String(order.dname).trim()}-${String(
                         order.dcode
-                    ).trim()}-${Number(order.price)}-${Number(order.qty)}-${String(order.mdocno).trim()}`;
+                    ).trim()}-${Number(order.price)}-${Number(order.qty)}-${String(
+                        order.mdocno
+                    ).trim()}`;
                     return !basketKeys.has(key);
                 });
 
+                // 5️⃣ normalize records
                 const recordsWithKey = orders.map((rec, idx) => ({
                     ...rec,
                     key: `${rec.code || "x"}-${rec.dname || "x"}-${rec.dcode || "x"}-${rec.price || 0
                         }-${rec.qty || 0}-${rec.mdocno || "x"}-${idx}`,
                     year: yy,
-                    month: parseInt(mm, 10),
+                    month: Number(mm),
                 }));
 
+                // 6️⃣ merge without duplicates
                 setAllData((prev) => {
                     const merged = [...prev, ...recordsWithKey];
-                    const unique = Array.from(new Map(merged.map((item) => [item.key, item])).values());
-                    return unique;
+                    return Array.from(
+                        new Map(merged.map((item) => [item.key, item])).values()
+                    );
                 });
-                console.log("allData:", allData);
-                const uniquePkgSet = new Set(filteredItems.map((item) => `${item.pkgno}-${item.pkgdate}`));
+
+                // 7️⃣ update basket count
+                const uniquePkgSet = new Set(
+                    filteredItems.map((item) => `${item.pkgno}-${item.pkgdate}`)
+                );
                 setUniqueCount(uniquePkgSet.size);
+
             } catch (err) {
-                message.error("Өгөгдөл авахад алдаа гарлаа.");
-                console.error(err);
+                // console.error("fetchData error:", err);
+                // message.error("Захиалгын мэдээлэл татахад алдаа гарлаа");
             } finally {
                 setLoading(false);
             }
@@ -117,8 +163,14 @@ const Багцлах = () => {
     );
 
     useEffect(() => {
-        fetchData(activeYear, new Date().getMonth() + 1);
+        (async () => {
+            const t = await fetchToken();
+            if (t) {
+                fetchData(activeYear, new Date().getMonth() + 1);
+            }
+        })();
     }, []);
+
 
     // ✅ Rollback handler — single modal for all selected rows
     const handleRollback = useCallback(() => {
@@ -132,7 +184,7 @@ const Багцлах = () => {
             title: "Буцаах баталгаажуулалт",
             content: (
                 <div>
-                    Та нийт <b>{selectedRows.length}</b> мөр буцаах гэж байна.
+                    Та нийт <b>{selectedRows.length}</b> Багц буцаах гэж байна.
                     <br />
                     <TextArea
                         rows={3}
@@ -220,10 +272,13 @@ const Багцлах = () => {
                                     if (isActive) {
                                         setActiveMonths((prev) => prev.filter((m) => m !== mm));
                                         setAllData((prev) => prev.filter((item) => item.month !== mm));
+                                        // allow re-fetch later if user clicks the month again
+                                        fetchedMonths.current.delete(`${activeYear}-${mm}`);
                                     } else {
                                         setActiveMonths((prev) => [...prev, mm]);
                                         fetchData(activeYear, String(mm));
                                     }
+
                                 }}
                             >
                                 {mm}
@@ -234,10 +289,10 @@ const Багцлах = () => {
 
                 {/* 🔹 Actions */}
                 <Space>
-                    <Button size="small" disabled={loading} onClick={handleRollback}>
+                    <Button size="small" disabled={loading} onClick={handleRollback} danger>
                         Буцаах
                     </Button>
-                    <Button size="small" disabled={loading} onClick={() => setVisible(true)}>
+                    <Button size="small" disabled={loading} onClick={() => setVisible(true)} type="primary">
                         Багцлах
                     </Button>
                     <MyModalWithTable

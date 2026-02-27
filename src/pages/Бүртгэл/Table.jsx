@@ -1,60 +1,64 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { Table, Button } from "antd";
+// GroupedTable.jsx
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { Table, Button, Modal } from "antd";
 import { groupBy } from "lodash";
 import axios from "axios";
+import InventoryReportForm from "./InventoryReportForm"; // adjust path
+
 const PLAN_BASE_URL = "http://192.168.4.119:3114/static/upload/plan";
 const TECH_BASE_URL = "http://192.168.4.119:3114/static/upload/tech";
 const API_BASE_URL = import.meta.env.VITE_API_URL;
+
 const GroupedTable = ({ data, onSelectRows }) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [invVisible, setInvVisible] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [customColumnsCount, setCustomColumnsCount] = useState(0);
 
-  // ✅ Group data by pkgno, keep original keys
+  const handleColumnsChange = (count) => {
+    setCustomColumnsCount(count);
+  };
+
+  const modalWidth = 1000 + customColumnsCount * 150;
+  useEffect(() => {
+    if (!API_BASE_URL) return;
+    axios
+      .get(`${API_BASE_URL}/get/branches`)
+      .then((res) => setBranches(res.data || []))
+      .catch((err) => console.error("Error fetching branches:", err));
+  }, []);
+
+  const getServiceByShortName = useCallback(
+    (shortName) => {
+      const found = branches.find((b) => b.shortName === shortName);
+      return found ? found.service : shortName || "";
+    },
+    [branches]
+  );
+
   const groupedData = useMemo(() => {
     const grouped = groupBy(data || [], "pkgno");
-
     return Object.keys(grouped).map((pkgno, pkgIndex) => {
       const items = grouped[pkgno] || [];
-
       return {
-        key: `pkg-${pkgno || "none"}-${pkgIndex}`, // for React
+        key: `pkg-${pkgno || "none"}-${pkgIndex}`,
         pkgno,
         pkgdate: items[0]?.pkgdate || "",
         dname: items[0]?.dname || "",
-        qty: items.reduce((sum, i) => sum + Number(i.qty || 0), 0),
-        pricesum: items.reduce((sum, i) => sum + Number(i.pricesum || 0), 0),
-
-        // ✅ Keep both the React key and the original composite key
+        qty: items.reduce((s, i) => s + Number(i.qty || 0), 0),
+        pricesum: items.reduce((s, i) => s + Number(i.pricesum || 0), 0),
         items: items.map((it, iidx) => ({
           ...it,
-          reactKey: `${pkgno || "none"}-${pkgIndex}-${iidx}`, // UI key
-          key: it.key, // backend key (code-dname-dcode-price-qty-mdocno-idx)
+          reactKey: `${pkgno || "none"}-${pkgIndex}-${iidx}`,
+          key: it.key,
         })),
-
         planurl: items[0]?.planurl || "",
         techurl: items[0]?.techurl || "",
       };
     });
   }, [data]);
-  const [branches, setBranches] = useState([]);
 
-  useEffect(() => {
-    axios
-      .get(`${API_BASE_URL}/get/branches`)
-      .then((res) => {
-        setBranches(res.data || []);
-      })
-      .catch((err) => {
-        console.error("❌ Error fetching branches:", err);
-      });
-  }, [API_BASE_URL]);
-  const getServiceByShortName = useCallback(
-    (shortName) => {
-      const found = branches.find((b) => b.shortName === shortName);
-      return found ? found.service : shortName || ""; // fallback to shortName if not found
-    },
-    [branches]
-  );
-  // ✅ Handle row selection
   const rowSelection = {
     selectedRowKeys,
     onChange: (keys, selectedRows) => {
@@ -69,43 +73,51 @@ const GroupedTable = ({ data, onSelectRows }) => {
     checkStrictly: false,
   };
 
-  // ✅ Nested table columns
   const nestedColumns = [
-    { title: "Нэр", dataIndex: "cr4name", key: "cr4name", width: "20%" },
-    { title: "Марк", dataIndex: "crmarkname", key: "crmarkname", width: "15%" },
+    { title: "Нэр", dataIndex: "cr4name", key: "cr4name", width: "25%" },
+    { title: "Марк", dataIndex: "crmarkname", key: "crmarkname", width: "12%" },
     {
       title: "Тоо хэмжээ",
       dataIndex: "qty",
       key: "qty",
       width: "10%",
-      render: (value) => Number(value || 0).toLocaleString(),
+      render: (v) => Number(v || 0).toLocaleString(),
     },
     { title: "Нэгж", dataIndex: "mname", key: "mname", width: "10%" },
-    { title: "Хэмжих нэгж", dataIndex: "usize", key: "usize", width: "15%" },
+    { title: "Хэмжих нэгж", dataIndex: "usize", key: "usize", width: "12%" },
     {
       title: "Үнэ",
       dataIndex: "price",
       key: "price",
-      width: "15%",
-      render: (value) => Number(value || 0).toLocaleString(),
+      width: "13%",
+      render: (v) => Number(v || 0).toLocaleString(),
     },
     {
       title: "Нийт дүн",
       dataIndex: "pricesum",
       key: "pricesum",
-      width: "15%",
-      render: (value) => Number(value || 0).toLocaleString(),
+      width: "18%",
+      render: (v) => Number(v || 0).toLocaleString(),
     },
   ];
 
-  // ✅ Main table columns
+  const handleOpenInventory = (record) => {
+    setSelectedRecord(record);
+    setInvVisible(true);
+  };
+
+  const handleCloseInventory = () => {
+    setInvVisible(false);
+    setSelectedRecord(null);
+  };
+
   const columns = [
     { title: "Багц №", dataIndex: "pkgno", key: "pkgno", width: "5%" },
     {
       title: "Сар",
       dataIndex: "pkgdate",
       key: "pkgdate",
-      width: "5%",
+      width: "6%",
       render: (text) => {
         if (!text) return "";
         const d = new Date(text);
@@ -117,37 +129,34 @@ const GroupedTable = ({ data, onSelectRows }) => {
       title: "Алба",
       dataIndex: "dname",
       key: "dname",
-      width: "5%",
+      width: "18%",
       render: (value) => {
         const service = getServiceByShortName(value);
-        return service ? (
+        return (
           <span>
             {service} <span style={{ color: "#888" }}>({value})</span>
           </span>
-        ) : (
-          <span>{value}</span>
         );
       },
     },
-
     {
       title: "Нийт Тоо хэмжээ",
       dataIndex: "qty",
       key: "qty",
-      width: "5%",
-      render: (value) => Number(value || 0).toLocaleString(),
+      width: "10%",
+      render: (v) => Number(v || 0).toLocaleString(),
     },
     {
       title: "Нийт Үнэ",
       dataIndex: "pricesum",
       key: "pricesum",
-      width: "5%",
-      render: (value) => Number(value || 0).toLocaleString(),
+      width: "12%",
+      render: (v) => Number(v || 0).toLocaleString(),
     },
     {
       title: "Захиалгууд",
       key: "items",
-      width: "65%",
+      width: "30%",
       render: (_, record) => (
         <div key={`nested-wrapper-${record.key}`} style={{ width: "100%" }}>
           <Table
@@ -158,7 +167,7 @@ const GroupedTable = ({ data, onSelectRows }) => {
             scroll={{ x: "100%" }}
             columns={nestedColumns}
             dataSource={record.items}
-            rowKey={(item) => item.reactKey} // ✅ Use reactKey here
+            rowKey={(item) => item.reactKey}
           />
         </div>
       ),
@@ -195,21 +204,43 @@ const GroupedTable = ({ data, onSelectRows }) => {
               Тех/Д үзэх
             </Button>
           )}
+          <Button type="link" onClick={() => handleOpenInventory(record)} style={{ paddingLeft: 6 }}>
+            Үлдэгдэл үзэх
+          </Button>
         </>
       ),
     },
   ];
 
   return (
-    <Table
-      rowSelection={rowSelection}
-      columns={columns}
-      dataSource={groupedData}
-      rowKey={(record) => record.key}
-      pagination={{ pageSize: 10 }}
-      bordered
-      size="middle"
-    />
+    <>
+      <Table
+        rowSelection={rowSelection}
+        columns={columns}
+        dataSource={groupedData}
+        rowKey={(r) => r.key}
+        pagination={{ pageSize: 10 }}
+        bordered
+        size="middle"
+      />
+      <Modal
+        title="Бараа материалын үлдэгдэл"
+        open={invVisible}
+        onCancel={handleCloseInventory}
+        footer={null}
+        centered
+        destroyOnClose
+        width={modalWidth} // 👈 dynamic width here
+      >
+        <InventoryReportForm
+          record={selectedRecord}
+          onClose={handleCloseInventory}
+          onColumnsChange={handleColumnsChange}  // 👈
+        />
+
+      </Modal>
+
+    </>
   );
 };
 
