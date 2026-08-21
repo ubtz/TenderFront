@@ -1,37 +1,20 @@
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
-import {
-  Typography,
-  Row,
-  Col,
-  Card,
-  Radio,
-  Select,
-  Spin,
-  message,
-} from "antd";
+import { Typography, Row, Col, Card, Radio, Select, Spin, message } from "antd";
 import ReactECharts from "echarts-for-react";
 import CountUp from "react-countup";
-import {
-  BarChartOutlined,
-  RiseOutlined,
-  DollarCircleOutlined,
-} from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import GovLogo from "../assets/Gov_Logo.png";
 import GovLogoTender from "../assets/Gov_Tender_logo.png";
 import GovLogoBank from "../assets/Gov_Bank_Logo.png";
-import GovLogoLaw from "../assets/Gov_Law_Logo.png";
+import GovLogoLaw from "../assets/Gov_Law_logo.png";
 import Gov_Ubtz_Logo from "../assets/Gov_Ubtz_Logo.jpg";
 import "./Home.css";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-// -----------------------------------------------------------------------------
-// STATIC DATA
-// -----------------------------------------------------------------------------
 const LOGOS = [
   { src: GovLogo, text: "САНГИЙН ЯАМ", url: "https://mof.gov.mn/" },
   { src: GovLogo, text: "ЗАМ, ТЭЭВРИЙН ЯАМ", url: "https://mrt.gov.mn/" },
@@ -42,110 +25,229 @@ const LOGOS = [
   { src: Gov_Ubtz_Logo, text: "УЛААНБААТАР ТӨМӨР ЗАМ", url: "https://ubtz.mn/" },
 ];
 
-const PIE_DATASETS = {
-  zam: [
-    { name: "Гэрээ байгуулсан", value: 98446, color: "#3b82f6" },
-    { name: "Тендер зарласан", value: 18174, color: "#f59e0b" },
-    { name: "Тендерийн нээлт хийсэн", value: 15145, color: "#a855f7" },
-    { name: "Түдгэлзүүлсэн", value: 572, color: "#22c55e" },
-    { name: "Үр дүн нийтэлсэн", value: 12116, color: "#ec4899" },
-  ],
-  alban: [
-    { name: "Гэрээ байгуулсан", value: 35412, color: "#3b82f6" },
-    { name: "Тендер зарласан", value: 20456, color: "#f59e0b" },
-    { name: "Тендерийн нээлт хийсэн", value: 11003, color: "#a855f7" },
-    { name: "Түдгэлзүүлсэн", value: 421, color: "#22c55e" },
-    { name: "Үр дүн нийтэлсэн", value: 9432, color: "#ec4899" },
-  ],
-  aan: [
-    { name: "Гэрээ байгуулсан", value: 2134, color: "#3b82f6" },
-    { name: "Тендер зарласан", value: 15234, color: "#f59e0b" },
-    { name: "Тендерийн нээлт хийсэн", value: 8123, color: "#a855f7" },
-    { name: "Түдгэлзүүлсэн", value: 302, color: "#22c55e" },
-    { name: "Үр дүн нийтэлсэн", value: 7011, color: "#ec4899" },
-  ],
-};
-
-const STATS = [
-  {
-    title: "НИЙТ ЗАРЛАГДСАН ТЕНДЕР",
-    value: 62537154,
-    count: 42,
-    color: "#10b981",
-    percent: 42,
-    icon: <none />,
-  },
-  {
-    title: "НИЙТ ТЕНДЕРИЙН ЗАХИАЛГА",
-    value: 72256178,
-    count: 772,
-    color: "#f43f5e",
-    percent: 8.4,
-    icon: <none />,
-  },
-  {
-    title: "БАЙГУУЛСАН ГЭРЭЭНИЙ ДҮН",
-    value: 36275453,
-    count: 162,
-    color: "#3b82f6",
-    percent: 49,
-    icon: <none />,
-  },
-];
-
-// -----------------------------------------------------------------------------
-// COMPONENT
-// -----------------------------------------------------------------------------
 export default function Home() {
+  const navigate = useNavigate();
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
+
   const [scope, setScope] = useState("zam");
   const [selectedAAN, setSelectedAAN] = useState(null);
+
   const [branchList, setBranchList] = useState([]);
+  const [branchStats, setBranchStats] = useState([]);
+  const [statisticData, setStatisticData] = useState([]);
+  const [statisticSummary, setStatisticSummary] = useState({
+    Dcode: "",
+    TotalOrders: 0,
+    TotalOrderValue: 0,
+    TotalTenders: 0,
+    TotalBudget: 0,
+    SuccessfulTenders: 0,
+    SuccessfulBudget: 0,
+    SuspendedTenders: 0,
+    TotalContracts: 0,
+    TotalContractValue: 0,
+  });
+
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState(null);
-  const [loadingStats, setLoadingStats] = useState(true);
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
-  const pieData = useMemo(() => PIE_DATASETS[scope], [scope]);
-  const navigate = useNavigate();
+
   useEffect(() => {
-    const fetchStatistics = async () => {
+    const fetchAll = async () => {
       try {
-        const res = await axios.get(`${API_BASE_URL}/get/Statistic`);
-        setStats(res.data);
+        const [branchesRes, branchStatsRes, statisticRes] = await Promise.all([
+          axios.get(`${API_BASE_URL}/get/branches`),
+          axios.get(`${API_BASE_URL}/get/GetBranchStatistics`),
+          axios.get(`${API_BASE_URL}/get/Statistic`),
+        ]);
+
+        setBranchList(Array.isArray(branchesRes.data) ? branchesRes.data : []);
+        setBranchStats(Array.isArray(branchStatsRes.data) ? branchStatsRes.data : []);
+
+        const statisticPayload = statisticRes.data || {};
+        setStatisticData(Array.isArray(statisticPayload.rows) ? statisticPayload.rows : []);
+        setStatisticSummary(statisticPayload.summary || {
+          Dcode: "",
+          TotalOrders: 0,
+          TotalOrderValue: 0,
+          TotalTenders: 0,
+          TotalBudget: 0,
+          SuccessfulTenders: 0,
+          SuccessfulBudget: 0,
+          SuspendedTenders: 0,
+          TotalContracts: 0,
+          TotalContractValue: 0,
+        });
       } catch (err) {
-        console.error("❌ Failed to fetch statistics:", err);
-        message.error("Статистикийн мэдээлэл татаж чадсангүй!");
+        console.error("❌ Failed to fetch dashboard data:", err);
+        message.error("Мэдээлэл татаж чадсангүй!");
       } finally {
-        setLoadingStats(false);
+        setLoading(false);
       }
     };
 
-    fetchStatistics();
+    fetchAll();
   }, [API_BASE_URL]);
 
-
   useEffect(() => {
-    axios
-      .get("http://192.168.4.107:3636/get/branches")
-      .then((res) => setBranchList(res.data || []))
-      .catch(() => message.error("Хэлтсүүдийн мэдээлэл татаж чадсангүй!"))
-      .finally(() => setLoading(false));
-  }, []);
+    setSelectedAAN(null);
+  }, [scope]);
 
-  const uniqueServices = useMemo(
-    () => [...new Set(branchList.map((b) => b.service))],
-    [branchList]
-  );
+  const uniqueServices = useMemo(() => {
+    return [...new Set(branchList.map((b) => b.service).filter(Boolean))];
+  }, [branchList]);
 
-  const chartOption = useMemo(
-    () => ({
-      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+  const selectedServiceBranchIds = useMemo(() => {
+    if (scope !== "alban" || !selectedAAN) return new Set();
+
+    return new Set(
+      branchList
+        .filter((b) => String(b.service) === String(selectedAAN))
+        .map((b) => String(b.id))
+    );
+  }, [branchList, scope, selectedAAN]);
+
+  const filteredBranchStats = useMemo(() => {
+    if (scope === "zam") return branchStats;
+
+    if (scope === "alban") {
+      if (!selectedServiceBranchIds.size) return [];
+      return branchStats.filter((item) =>
+        selectedServiceBranchIds.has(String(item.branchId))
+      );
+    }
+
+    if (!selectedAAN) return [];
+    return branchStats.filter(
+      (item) => String(item.branchId) === String(selectedAAN)
+    );
+  }, [branchStats, scope, selectedAAN, selectedServiceBranchIds]);
+
+  const filteredStatisticData = useMemo(() => {
+    if (scope === "zam") return statisticData;
+
+    if (scope === "alban") {
+      if (!selectedServiceBranchIds.size) return [];
+      return statisticData.filter((item) =>
+        selectedServiceBranchIds.has(String(item.dcode))
+      );
+    }
+
+    if (!selectedAAN) return [];
+    return statisticData.filter((item) => String(item.dcode) === String(selectedAAN));
+  }, [statisticData, scope, selectedAAN, selectedServiceBranchIds]);
+
+  const displayStats = useMemo(() => {
+    if (scope === "zam") {
+      return statisticSummary;
+    }
+
+    return filteredStatisticData.reduce(
+      (acc, item) => {
+        acc.TotalOrders += Number(item.TotalOrders) || 0;
+        acc.TotalOrderValue += Number(item.TotalOrderValue) || 0;
+        acc.TotalTenders += Number(item.TotalTenders) || 0;
+        acc.TotalBudget += Number(item.TotalBudget) || 0;
+        acc.SuccessfulTenders += Number(item.SuccessfulTenders) || 0;
+        acc.SuccessfulBudget += Number(item.SuccessfulBudget) || 0;
+        acc.SuspendedTenders += Number(item.SuspendedTenders) || 0;
+
+        if (!acc.TotalContracts) {
+          acc.TotalContracts = Number(item.TotalContracts) || 0;
+        }
+        if (!acc.TotalContractValue) {
+          acc.TotalContractValue = Number(item.TotalContractValue) || 0;
+        }
+
+        return acc;
+      },
+      {
+        Dcode: "",
+        TotalOrders: 0,
+        TotalOrderValue: 0,
+        TotalTenders: 0,
+        TotalBudget: 0,
+        SuccessfulTenders: 0,
+        SuccessfulBudget: 0,
+        SuspendedTenders: 0,
+        TotalContracts: 0,
+        TotalContractValue: 0,
+      }
+    );
+  }, [scope, statisticSummary, filteredStatisticData]);
+
+  const branchSummary = useMemo(() => {
+    return filteredBranchStats.reduce(
+      (acc, item) => {
+        acc.orders += Number(item.orders) || 0;
+        acc.qty += Number(item.qty) || 0;
+        acc.amount += Number(item.amount) || 0;
+        return acc;
+      },
+      { orders: 0, qty: 0, amount: 0 }
+    );
+  }, [filteredBranchStats]);
+
+  const pieSummary = useMemo(() => {
+    if (scope === "zam") {
+      return {
+        orders: Number(statisticSummary.TotalOrders) || 0,
+        tenders: Number(statisticSummary.TotalTenders) || 0,
+        contracts: Number(statisticSummary.TotalContracts) || 0,
+      };
+    }
+
+    if (!filteredStatisticData.length) {
+      return { orders: 0, tenders: 0, contracts: 0 };
+    }
+
+    return filteredStatisticData.reduce(
+      (acc, item) => {
+        acc.orders += Number(item.TotalOrders) || 0;
+        acc.tenders += Number(item.TotalTenders) || 0;
+
+        if (!acc.contracts) {
+          acc.contracts = Number(item.TotalContracts) || 0;
+        }
+
+        return acc;
+      },
+      { orders: 0, tenders: 0, contracts: 0 }
+    );
+  }, [scope, statisticSummary, filteredStatisticData]);
+
+  const pieData = useMemo(() => {
+    if (scope === "zam") {
+      return [
+        { name: "Захиалга", value: pieSummary.orders, color: "#3b82f6" },
+        { name: "Тендер", value: pieSummary.tenders, color: "#10b981" },
+        { name: "Гэрээ", value: pieSummary.contracts, color: "#f59e0b" },
+      ].filter((item) => item.value > 0);
+    }
+
+    if (scope === "alban" && !selectedAAN) return [];
+    if (scope === "aan" && !selectedAAN) return [];
+
+    return [
+      { name: "Захиалга", value: pieSummary.orders, color: "#3b82f6" },
+      { name: "Тендер", value: pieSummary.tenders, color: "#10b981" },
+      { name: "Гэрээ", value: pieSummary.contracts, color: "#f59e0b" },
+    ].filter((item) => item.value > 0);
+  }, [pieSummary, scope, selectedAAN]);
+
+  const chartOption = useMemo(() => {
+    const total = pieData.reduce((sum, item) => sum + item.value, 0);
+
+    return {
+      tooltip: {
+        trigger: "item",
+        formatter: "{b}: {c} ({d}%)",
+      },
       graphic: [
         {
           type: "text",
           left: "center",
           top: "middle",
           style: {
-            text: `${pieData.reduce((s, d) => s + d.value, 0).toLocaleString()}\nНийт`,
+            text: `${total.toLocaleString()}\nНийт`,
             textAlign: "center",
             fill: "#0f172a",
             fontSize: 16,
@@ -164,7 +266,9 @@ export default function Home() {
             fontSize: 14,
             fontWeight: 500,
             color: "#334155",
-            formatter: "{b}: {d}%",
+            formatter: (params) => {
+              return `${params.name}: ${params.value.toLocaleString()}`;
+            },
           },
           labelLine: { length: 15, length2: 20, smooth: true },
           itemStyle: {
@@ -184,11 +288,12 @@ export default function Home() {
           animationDelay: (idx) => idx * 150,
         },
       ],
-    }),
-    [pieData]
-  );
+    };
+  }, [pieData]);
 
-  if (loading) return <Spin fullscreen size="large" tip="Түр хүлээнэ үү..." />;
+  if (loading) {
+    return <Spin fullscreen size="large" tip="Түр хүлээнэ үү..." />;
+  }
 
   return (
     <div
@@ -198,23 +303,22 @@ export default function Home() {
         minHeight: "100vh",
       }}
     >
-      {/* HEADER */}
-      <Card
+      {/* <Card
         style={{
           marginBottom: 24,
           textAlign: "center",
           borderRadius: 14,
           background: "linear-gradient(135deg, #ffffff, #f8fafc)",
           boxShadow: "0 3px 12px rgba(0,0,0,0.04)",
-          padding: "10px 0", // 👈 Reduced padding
-          height: 90,         // 👈 Controlled height
+          padding: "10px 0",
+          height: 90,
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
         }}
       >
         <Text style={{ fontSize: 15, color: "#475569", fontWeight: 500 }}>
-          НИЙТ ТЕНДЕРИЙН МӨНГӨН ДҮН (тэрбум төгрөгөөр)
+          НИЙТ ТЕНДЕРИЙН МӨНГӨН ДҮН
         </Text>
         <Title
           level={3}
@@ -224,18 +328,21 @@ export default function Home() {
             marginBottom: 0,
             fontWeight: 700,
             lineHeight: 1,
-            fontSize: 24, // slightly smaller
+            fontSize: 24,
           }}
         >
-          <CountUp end={151453} duration={2} separator="," />
+          <CountUp end={stats?.TotalBudget || 0} duration={2} separator="," />
         </Title>
-      </Card>
+      </Card> */}
 
       <Row gutter={32}>
-        {/* LEFT PIE SECTION */}
         <Col xs={24} md={16}>
           <Card
-            title={<Text style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>ТЕНДЕРИЙН ТОО МЭДЭЭ</Text>}
+            title={
+              <Text style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
+                ТЕНДЕРИЙН ТОО МЭДЭЭ
+              </Text>
+            }
             style={{
               borderRadius: 20,
               boxShadow: "0 4px 25px rgba(0,0,0,0.08)",
@@ -262,28 +369,33 @@ export default function Home() {
             </div>
 
             {scope !== "zam" && (
-              <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  marginBottom: 24,
+                }}
+              >
                 <Select
                   style={{ width: 320 }}
                   placeholder={scope === "alban" ? "Алба сонгох" : "ААН сонгох"}
                   value={selectedAAN}
                   onChange={setSelectedAAN}
                   showSearch
+                  allowClear
                   optionFilterProp="children"
-                  variant={false}
-                  styles={{ popup: { borderRadius: 12 } }}  // ✅ modern replacement
                 >
                   {(scope === "alban" ? uniqueServices : branchList).map((b) => (
                     <Option key={b.id || b} value={b.id || b}>
-                      {b.shortName ? `${b.shortName} — ${b.branch}` : b}
+                      {typeof b === "string"
+                        ? b
+                        : `${b.shortName || b.id} — ${b.branch || ""}`}
                     </Option>
                   ))}
                 </Select>
-
               </div>
             )}
 
-            {/* PIE CHART */}
             <div
               style={{
                 background: "radial-gradient(circle at center, #f9fafb 0%, #f1f5f9 100%)",
@@ -296,7 +408,6 @@ export default function Home() {
             >
               <ReactECharts option={chartOption} style={{ height: 380 }} />
 
-              {/* Modern Legend */}
               <div
                 style={{
                   marginTop: 24,
@@ -327,34 +438,31 @@ export default function Home() {
                         background: item.color,
                       }}
                     />
-                    <span style={{ fontWeight: 500, color: "#0f172a" }}>
-                      {item.name}
-                    </span>
+                    <span style={{ fontWeight: 500, color: "#0f172a" }}>{item.name}</span>
                     <span style={{ color: "#475569" }}>
                       {item.value.toLocaleString()}
                     </span>
                   </div>
                 ))}
               </div>
+
+              {(scope === "zam" || selectedAAN) && (
+                <div style={{ marginTop: 20, color: "#64748b", fontSize: 14 }}>
+                  Захиалга: <strong>{branchSummary.orders.toLocaleString()}</strong> | Тоо хэмжээ:{" "}
+                  <strong>{branchSummary.qty.toLocaleString()}</strong> | Мөнгөн дүн:{" "}
+                  <strong>{branchSummary.amount.toLocaleString()}</strong>
+                </div>
+              )}
             </div>
           </Card>
         </Col>
 
-        {/* RIGHT SIDE CARDS */}
-        {/* ✅ RIGHT SIDE LIVE STATISTICS */}
         <Col xs={24} md={8}>
-          {loadingStats ? (
-            <Spin
-              size="large"
-              tip="Статистик ачаалж байна..."
-              style={{ width: "100%", marginTop: 50 }}
-            />
-          ) : stats ? (
+          {displayStats ? (
             <>
-              {/* 🟢 НИЙТ ТЕНДЕРИЙН ЗАХИАЛГА */}
               <Card
                 style={{
-                  background: `linear-gradient(135deg, #10b98115, #10b98125)`,
+                  background: "linear-gradient(135deg, #10b98115, #10b98125)",
                   backdropFilter: "blur(8px)",
                   border: "1px solid rgba(255,255,255,0.3)",
                   borderRadius: 20,
@@ -373,31 +481,28 @@ export default function Home() {
                 styles={{ body: { padding: "22px 26px" } }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 12px 24px rgba(0,0,0,0.15)";
+                  e.currentTarget.style.boxShadow = "0 12px 24px rgba(0,0,0,0.15)";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow =
-                    "0 8px 20px rgba(0,0,0,0.08)";
+                  e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.08)";
                 }}
               >
                 <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>
                   НИЙТ ТЕНДЕРИЙН ЗАХИАЛГА
                 </Title>
                 <Text style={{ fontSize: 15, color: "#64748b" }}>
-                  Тоо: {stats.TotalOrders}
+                  Тоо: {displayStats.TotalOrders.toLocaleString()}
                 </Text>
                 <br />
                 <Text strong style={{ fontSize: 24, color: "#10b981" }}>
-                  <CountUp end={stats.TotalOrderValue} duration={2} separator="," />
+                  <CountUp end={displayStats.TotalOrderValue} duration={2} separator="," />
                 </Text>
               </Card>
 
-              {/* 🔴 НИЙТ ЗАРЛАГДСАН ТЕНДЕР */}
               <Card
                 style={{
-                  background: `linear-gradient(135deg, #f43f5e15, #f43f5e25)`,
+                  background: "linear-gradient(135deg, #f43f5e15, #f43f5e25)",
                   backdropFilter: "blur(8px)",
                   border: "1px solid rgba(255,255,255,0.3)",
                   borderRadius: 20,
@@ -416,31 +521,28 @@ export default function Home() {
                 styles={{ body: { padding: "22px 26px" } }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 12px 24px rgba(0,0,0,0.15)";
+                  e.currentTarget.style.boxShadow = "0 12px 24px rgba(0,0,0,0.15)";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow =
-                    "0 8px 20px rgba(0,0,0,0.08)";
+                  e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.08)";
                 }}
               >
                 <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>
                   НИЙТ ЗАРЛАГДСАН ТЕНДЕР
                 </Title>
                 <Text style={{ fontSize: 15, color: "#64748b" }}>
-                  Тоо: {stats.TotalTenders}
+                  Тоо: {displayStats.TotalTenders.toLocaleString()}
                 </Text>
                 <br />
                 <Text strong style={{ fontSize: 24, color: "#f43f5e" }}>
-                  <CountUp end={stats.TotalBudget} duration={2} separator="," />
+                  <CountUp end={displayStats.TotalBudget} duration={2} separator="," />
                 </Text>
               </Card>
 
-              {/* 🔵 БАЙГУУЛСАН ГЭРЭЭНИЙ ДҮН */}
               <Card
                 style={{
-                  background: `linear-gradient(135deg, #3b82f615, #3b82f625)`,
+                  background: "linear-gradient(135deg, #3b82f615, #3b82f625)",
                   backdropFilter: "blur(8px)",
                   border: "1px solid rgba(255,255,255,0.3)",
                   borderRadius: 20,
@@ -459,24 +561,22 @@ export default function Home() {
                 styles={{ body: { padding: "22px 26px" } }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 12px 24px rgba(0,0,0,0.15)";
+                  e.currentTarget.style.boxShadow = "0 12px 24px rgba(0,0,0,0.15)";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow =
-                    "0 8px 20px rgba(0,0,0,0.08)";
+                  e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.08)";
                 }}
               >
                 <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>
                   БАЙГУУЛСАН ГЭРЭЭНИЙ ДҮН
                 </Title>
                 <Text style={{ fontSize: 15, color: "#64748b" }}>
-                  Тоо: {stats.TotalContracts}
+                  Тоо: {displayStats.TotalContracts.toLocaleString()}
                 </Text>
                 <br />
                 <Text strong style={{ fontSize: 24, color: "#3b82f6" }}>
-                  <CountUp end={stats.TotalContractValue} duration={2} separator="," />
+                  <CountUp end={displayStats.TotalContractValue} duration={2} separator="," />
                 </Text>
               </Card>
             </>
@@ -484,11 +584,8 @@ export default function Home() {
             <Text type="secondary">Мэдээлэл олдсонгүй.</Text>
           )}
         </Col>
-
-
       </Row>
 
-      {/* FOOTER LOGOS */}
       <div
         style={{
           marginTop: 50,

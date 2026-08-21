@@ -1,8 +1,8 @@
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { jwtDecode } from "jwt-decode"; // ✅ named import
+import { getTokenClaims } from "../api/session";
 
-const PrivateRoute = ({ children }) => {
+const PrivateRoute = ({ children, allowedRoles }) => {
     const token = localStorage.getItem("token");
     const location = useLocation();
 
@@ -12,13 +12,18 @@ const PrivateRoute = ({ children }) => {
     }
 
     try {
-        const decoded = jwtDecode(token);
+        const decoded = getTokenClaims();
+        if (!decoded) throw new Error("Invalid token");
         const currentTime = Date.now() / 1000;
 
-        if (decoded.exp < currentTime) {
+        if (!decoded.exp || decoded.exp < currentTime) {
             console.log(`[TOKEN EXPIRED] Token expired. User: ${decoded.email || "unknown"}`);
             localStorage.removeItem("token");
             return <Navigate to="/login" replace />;
+        }
+
+        if (allowedRoles?.length && !allowedRoles.includes(decoded.role)) {
+            return <Navigate to="/" replace />;
         }
 
         console.log(`[ACCESS GRANTED] Route: ${location.pathname}, User: ${decoded.email || "unknown"}`);

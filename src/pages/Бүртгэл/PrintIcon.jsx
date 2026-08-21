@@ -287,7 +287,7 @@ const PrintIcon = ({ normData, planId, UserId }) => {
             },
 
             { text: item.price || "", fontSize: 8, alignment: "left" },
-            { text: item.pricesum?.toString() || "0", fontSize: 8, alignment: "right" },
+            { text: (Number(item.qty || 0) * Number(item.price || 0)).toString(), fontSize: 8, alignment: "right" },
             { text: basket.total_price?.toString() || "", fontSize: 8, alignment: "right" },
             { text: data.total_price?.toString() || "", fontSize: 8, alignment: "right" },
             { text: basket.publish_date?.toString() || "", fontSize: 8, alignment: "right" },

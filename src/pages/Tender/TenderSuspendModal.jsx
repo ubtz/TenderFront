@@ -17,6 +17,8 @@ const TenderSuspendModal = ({
       onCancel={onCancel}
       okText="Хадгалах"
       cancelText="Болих"
+      okButtonProps={{ danger: true, disabled: !date }}
+      destroyOnHidden
     >
       <DatePicker
         showTime

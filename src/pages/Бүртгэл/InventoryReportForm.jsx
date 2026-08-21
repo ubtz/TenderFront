@@ -59,13 +59,7 @@ export default function InventoryReportForm({ record = {}, onClose }) {
     useEffect(() => {
         let mounted = true;
 
-        const TOKEN_ENDPOINT = "http://192.168.4.107:8008/v1/token/gtoken";
-        const ORDERS_ENDPOINT = "http://192.168.4.107:8008/v1/orders/materc2";
-
-        const credentials = {
-            Username: "coss.api.lib.nrp",
-            Password: "coss.api.lib.nrp.",
-        };
+        const API_BASE_URL = import.meta.env.VITE_API_URL;
 
         const pkgDateStr =
             record.Pkgdate ||
@@ -74,26 +68,19 @@ export default function InventoryReportForm({ record = {}, onClose }) {
 
         const pkgNoStr = record.Pkgno || record.pkgno || "1";
 
-        const fetchToken = async () => {
-            const res = await axios.post(TOKEN_ENDPOINT, credentials);
-            return res.data?.Token ?? res.data;
-        };
-
-        const fetchOrders = async (token) => {
+        const fetchOrders = async () => {
             const body = {
                 Pkgdate: pkgDateStr,
                 Pkgno: pkgNoStr,
-                Token: token.tokendata,
             };
-            const res = await axios.post(ORDERS_ENDPOINT, body);
+            const res = await axios.post(`${API_BASE_URL}/external/orders/materc2`, body);
             return res.data;
         };
 
         const load = async () => {
             setLoading(true);
             try {
-                const token = await fetchToken();
-                const data = await fetchOrders(token);
+                const data = await fetchOrders();
 
                 if (!mounted) return;
 

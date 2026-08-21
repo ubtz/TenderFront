@@ -492,7 +492,7 @@ const Явц = () => {
                         background: "#f9fafb",
                         marginBottom: 16,
                     }}
-                    bodyStyle={{ padding: 12 }}
+                    styles={{ body: { padding: 12 } }}
                 >
                     <Steps
                         current={currentIndex}
@@ -531,7 +531,7 @@ const Явц = () => {
                             background: "#ffffff",
                             border: "1px solid #e5e7eb",
                         }}
-                        bodyStyle={{ padding: 12 }}
+                        styles={{ body: { padding: 12 } }}
                     >
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
                             <div style={{ flex: 1, minWidth: 220 }}>
@@ -575,7 +575,7 @@ const Явц = () => {
                 </Card>
 
                 {/* БАГЦЫН ХҮСНЭГТ -> VERTICAL LIST (1 item per row) */}
-                <Card size="small" style={{ borderRadius: 12 }} bodyStyle={{ padding: 12 }} title="Багцласан захиалгууд">
+                <Card size="small" style={{ borderRadius: 12 }} styles={{ body: { padding: 12 } }} title="Багцласан захиалгууд">
                     {loadingItems ? (
                         <div style={{ textAlign: "center", padding: "40px 0" }}>
                             <Spin tip="Ачаалж байна..." />
@@ -605,7 +605,7 @@ const Явц = () => {
                     width={720}
                     open={!!selectedBundle}
                     onClose={() => setSelectedBundle(null)}
-                    destroyOnClose
+                    destroyOnHidden
                 >
                     {selectedBundle && (
                         <>

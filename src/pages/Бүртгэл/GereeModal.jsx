@@ -9,6 +9,7 @@ import {
   DatePicker,
   Select,
   Collapse,
+  Descriptions,
   Tag,
   Button,
   Segmented,
@@ -28,54 +29,28 @@ import dayjs from "dayjs";
 import axios from "axios";
 
 const { TextArea } = Input;
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const GereeModal = ({ visible, record, onClose, user, handleUpdate }) => {
   const [viewMode, setViewMode] = useState("details");
   const [loadingReg, setLoadingReg] = useState(false);
-  const [apiToken, setApiToken] = useState(null);
+  const [regValue, setRegValue] = useState("");
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   const [localRecord, setLocalRecord] = useState(record);
 
   useEffect(() => {
     setLocalRecord(record);
+    setRegValue(record?.["ААН_регистер"] || "");
   }, [record]);
   if (!record) return null;
-
-  /** === API: Get token === */
-  const getNewToken = async () => {
-    try {
-      const res = await axios.post("http://192.168.4.107:8008/v1/token/gtoken", {
-        Username: "coss.api.lib.nrp",
-        Password: "coss.api.lib.nrp.",
-      });
-      if (res.data?.tokendata) {
-        setApiToken(res.data.tokendata);
-        return res.data.tokendata;
-      }
-    } catch (err) {
-      console.error("⚠️ Token fetch failed:", err);
-      message.error("Token татахад алдаа гарлаа");
-    }
-    return null;
-  };
 
   /** === Fetch client info by register === */
   const fetchClientInfo = async (reg) => {
     if (!reg) return;
     try {
       setLoadingReg(true);
-      let token = apiToken || (await getNewToken());
-      if (!token) return;
-
-      const API_URL = "http://192.168.4.107:8008/v1/orders/client";
-      let res = await axios.post(API_URL, { Value: reg, Token: token });
-
-      if (res.data?.status === false || /token/i.test(res.data?.message || "")) {
-        token = await getNewToken();
-        if (!token) return;
-        res = await axios.post(API_URL, { Value: reg, Token: token });
-      }
+      const res = await axios.post(`${API_BASE_URL}/external/orders/client`, { Value: reg });
 
       if (res.data?.status) {
         const companyName =
@@ -206,15 +181,54 @@ const GereeModal = ({ visible, record, onClose, user, handleUpdate }) => {
                 boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
               }}
             >
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: "11px 12px",
+                  border: "1px solid #c8dcec",
+                  borderRadius: 9,
+                  background: "linear-gradient(105deg, #eef8ff 0%, #fffaf2 52%, #effaf5 100%)",
+                }}
+              >
+                <Text strong style={{ display: "block", marginBottom: 8, color: "#294e68" }}>
+                  Эх тендер
+                </Text>
+                <Descriptions
+                  size="small"
+                  column={1}
+                  items={[
+                    {
+                      key: "number",
+                      label: "Тендерийн дугаар",
+                      children: record["тендерийн_дугаар"] || "—",
+                    },
+                    {
+                      key: "name",
+                      label: "Тендерийн нэр",
+                      children: record.tender_name || "—",
+                    },
+                    {
+                      key: "type",
+                      label: "Тендерийн төрөл",
+                      children: record["тендерийн_төрөл"] || "—",
+                    },
+                  ]}
+                />
+              </div>
+
               <Label text="ААН регистер" />
               <Space.Compact style={{ width: "100%", marginBottom: 12 }}>
                 <Input
                   placeholder="Регистрийн дугаар"
                   allowClear
+                  value={regValue}
+                  onChange={(event) => setRegValue(event.target.value)}
                   onPressEnter={(e) => fetchClientInfo(e.target.value)}
                 />
                 <Button
                   type="primary"
+                  loading={loadingReg}
+                  disabled={!regValue.trim()}
                   onClick={() => fetchClientInfo(regValue)}
                 >
                   Хайх
@@ -225,6 +239,7 @@ const GereeModal = ({ visible, record, onClose, user, handleUpdate }) => {
               <Label text="Бэлтгэн нийлүүлэгч ААН" />
               <Input
                 value={localRecord?.["бэлтгэн_нийлүүлэгч_ААН"] || ""}
+                readOnly
               />
 
               <Label text="Худалдан авагч" />

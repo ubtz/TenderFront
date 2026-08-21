@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Table, Button, Checkbox, Space, Card, Typography, Tooltip } from "antd";
-import * as XLSX from "xlsx";
-import { FileExcelOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
+import { DownloadOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 
 const { Title, Text } = Typography;
 
@@ -54,19 +53,22 @@ const Тайлан = () => {
 
     const handleCheckboxChange = (checkedValues) => setSelectedKeys(checkedValues);
 
-    const exportToExcel = () => {
-        const worksheet = XLSX.utils.json_to_sheet(
-            data.map((row) => {
-                const output = {};
-                visibleColumns.forEach((col) => {
-                    output[col.title] = row[col.dataIndex] || "";
-                });
-                return output;
-            })
-        );
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Тайлан");
-        XLSX.writeFile(workbook, "Тайлан.xlsx");
+    const exportToCsv = () => {
+        const escapeCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+        const headers = visibleColumns.map((column) => column.title);
+        const csv = [
+            headers.map(escapeCell).join(","),
+            ...data.map((row) =>
+                visibleColumns.map((column) => escapeCell(row[column.dataIndex])).join(",")
+            ),
+        ].join("\r\n");
+        const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "Тайлан.csv";
+        link.click();
+        URL.revokeObjectURL(url);
     };
 
     return (
@@ -92,14 +94,14 @@ const Тайлан = () => {
                 <Space style={{ marginBottom: 12, flexWrap: "wrap" }}>
                     <Button
                         type="primary"
-                        icon={<FileExcelOutlined />}
-                        onClick={exportToExcel}
+                        icon={<DownloadOutlined />}
+                        onClick={exportToCsv}
                         style={{
                             borderRadius: 8,
                             background: "linear-gradient(135deg, #22c55e, #16a34a)",
                         }}
                     >
-                        Excel файл гаргах
+                        CSV файл гаргах
                     </Button>
 
                     <Button

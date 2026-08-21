@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import axios from "axios";
 
 const { Title } = Typography;
+const { Option } = Select;
 
 const Tender_Бүртгэх = () => {
     const [form] = Form.useForm();
@@ -50,6 +51,7 @@ const Tender_Бүртгэх = () => {
             шалгаруулалтын_төрөл: values.selectionType,
             тендерийн_дугаар: values.tenderNumber,
             тендерийн_төрөл: values.tenderType,
+            зарласан_огноо: values.announceDate ? values.announceDate.format("YYYY-MM-DD") : null,
             батлагдсан_төсөвт_өртөг: values.approvedBudget,
             урилгын_дугаар: values.invitationNumber,
             урилгын_огноо: values.invitationDate ? values.invitationDate.format("YYYY-MM-DD") : null,

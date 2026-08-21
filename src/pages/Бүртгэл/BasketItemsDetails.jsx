@@ -1,6 +1,22 @@
 import React, { useEffect, useState } from "react";
-import { Table, Spin, message, Checkbox, Input } from "antd";
+import { Table, Spin, message, Checkbox, Input, Button, Tag, Typography } from "antd";
+import {
+    DownOutlined,
+    InboxOutlined,
+    RightOutlined,
+    ShoppingCartOutlined,
+} from "@ant-design/icons";
 import axios from "axios";
+import { getStoredUser } from "../../api/session";
+import "./BasketItemsDetails.css";
+
+const { Text } = Typography;
+
+const formatCposCode = (value) => {
+    const code = String(value || "").trim().replace(/-/g, "");
+    if (!/^\d{14}$/.test(code)) return String(value || "").trim() || "-";
+    return code.replace(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{3})(\d{3})$/, "$1-$2-$3-$4-$5-$6");
+};
 
 const BasketItemsDetails = ({ basketIds, mode }) => {
     const [loading, setLoading] = useState(false);
@@ -9,10 +25,9 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
     const [expandedRowKeys, setExpandedRowKeys] = useState([]);
     const API_BASE_URL = import.meta.env.VITE_API_URL;
 
-    const userJson = localStorage.getItem("data");
-    const user = userJson ? JSON.parse(userJson) : null;
+    const user = getStoredUser();
     const isUdirdlaga =
-        user?.erh?.toLowerCase() === "Удирдлага";
+        user?.erh?.toLowerCase() === "удирдлага";
 
     // ✅ Fetch branches once
     useEffect(() => {
@@ -88,7 +103,10 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
     const tableData = Object.keys(groupedByBasket).map((basketId) => {
         const group = groupedByBasket[basketId];
         const totalQty = group.reduce((sum, it) => sum + Number(it.qty || 0), 0);
-        const totalPrice = group.reduce((sum, it) => sum + Number(it.pricesum || 0), 0);
+        const totalPrice = group.reduce(
+            (sum, it) => sum + Number(it.qty || 0) * Number(it.price || 0),
+            0
+        );
         return {
             key: basketId,
             basket_id: basketId,
@@ -99,6 +117,14 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             items: group,
         };
     });
+    const workspaceSummary = tableData.reduce(
+        (summary, basket) => ({
+            itemCount: summary.itemCount + basket.count,
+            totalQty: summary.totalQty + basket.total_qty,
+            totalPrice: summary.totalPrice + basket.total_price,
+        }),
+        { itemCount: 0, totalQty: 0, totalPrice: 0 }
+    );
 
     const handleRowClick = (record) => {
         setExpandedRowKeys((prev) =>
@@ -114,13 +140,22 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             title: "Багцны нэр",
             dataIndex: "basket_name",
             key: "basket_name",
-            render: (name) => <b>{name}</b>,
+            render: (name, record) => (
+                <div className="basket-items-package-name">
+                    <span className="basket-items-package-name__icon"><InboxOutlined /></span>
+                    <span>
+                        <Text strong>{name}</Text>
+                        <small>Багц #{record.basket_id}</small>
+                    </span>
+                </div>
+            ),
         },
         {
-            title: "Барааны тоо",
+            title: "Захиалга",
             dataIndex: "count",
             key: "count",
             align: "center",
+            render: (value) => <Tag bordered={false} color="blue">{value} захиалга</Tag>,
         },
         {
             title: "Нийт тоо хэмжээ",
@@ -169,13 +204,21 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
                 return <span>{formatted}</span>;
             },
         },
-        { title: "Хэмжих нэгж", dataIndex: "mname", key: "mname" },
+        { title: "Хэмжих нэгж", dataIndex: "mname", key: "mname", width: 90 },
+        {
+            title: "Код",
+            dataIndex: "code",
+            key: "code",
+            width: 145,
+            render: formatCposCode,
+        },
         { title: "Нэр", dataIndex: "cr4name", key: "cr4name" },
         { title: "Марк", dataIndex: "crmarkname", key: "crmarkname" },
         {
             title: "Тоо хэмжээ",
             dataIndex: "qty",
             key: "qty",
+            width: 90,
             align: "right",
             render: (v) => v?.toLocaleString(),
         },
@@ -188,10 +231,10 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
         },
         {
             title: "Нийт үнэ",
-            dataIndex: "pricesum",
             key: "pricesum",
             align: "right",
-            render: (v) => (v != null ? v.toLocaleString() + " ₮" : ""),
+            render: (_, record) =>
+                (Number(record.qty || 0) * Number(record.price || 0)).toLocaleString() + " ₮",
         },
     ];
 
@@ -356,46 +399,79 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
 
     // ✅ Expanded row
     const expandedRowRender = (record) => (
-        <Table
-            columns={itemColumns}
-            dataSource={record.items.map((item) => ({
-                key: item.basket_item_id,
-                ...item,
-            }))}
-            pagination={false}
-            size="small"
-            bordered
-        />
+        <div className="basket-items-expanded">
+            <div className="basket-items-expanded__header">
+                <div className="basket-items-expanded__title">
+                    <ShoppingCartOutlined /> <strong>{record.basket_name}</strong>
+                    <span> багцын захиалгууд</span>
+                </div>
+                <Tag bordered={false}>{record.count} захиалга</Tag>
+            </div>
+            <Table
+                className="basket-items-detail-table"
+                columns={itemColumns}
+                dataSource={record.items.map((item) => ({
+                    key: item.basket_item_id,
+                    ...item,
+                }))}
+                pagination={false}
+                size="small"
+                scroll={{ x: 1080 }}
+            />
+        </div>
     );
 
     return (
-        <Table
-            columns={basketColumns}
-            dataSource={tableData}
-            expandable={{
-                expandedRowRender,
-                rowExpandable: (record) => record.items?.length > 0,
-                expandedRowKeys,
-                onExpand: (expanded, record) => {
-                    setExpandedRowKeys((prev) =>
-                        expanded
-                            ? [...prev, record.key]
-                            : prev.filter((k) => k !== record.key)
-                    );
-                },
-            }}
-            onRow={(record) => ({
-                onClick: () => handleRowClick(record),
-                className: expandedRowKeys.includes(record.key)
-                    ? "expanded-row"
-                    : "",
-            })}
-            rowKey="key"
-            pagination={false}
-            bordered
-            size="small"
-            style={{ cursor: "pointer" }}
-        />
+        <div className="basket-items-workspace">
+            <div className="basket-items-summary">
+                <div><span>Багц</span><strong>{tableData.length}</strong></div>
+                <div><span>Захиалга</span><strong>{workspaceSummary.itemCount}</strong></div>
+                <div><span>Нийт тоо</span><strong>{workspaceSummary.totalQty.toLocaleString()}</strong></div>
+                <div className="basket-items-summary__amount">
+                    <span>Нийт үнэ</span>
+                    <strong>{workspaceSummary.totalPrice.toLocaleString()} ₮</strong>
+                </div>
+            </div>
+            <Table
+                className="basket-items-group-table"
+                columns={basketColumns}
+                dataSource={tableData}
+                expandable={{
+                    expandedRowRender,
+                    rowExpandable: (record) => record.items?.length > 0,
+                    expandedRowKeys,
+                    expandIcon: ({ expanded, onExpand, record }) => (
+                        <Button
+                            type="text"
+                            shape="circle"
+                            className="basket-items-expand-button"
+                            icon={expanded ? <DownOutlined /> : <RightOutlined />}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onExpand(record, event);
+                            }}
+                        />
+                    ),
+                    onExpand: (expanded, record) => {
+                        setExpandedRowKeys((prev) =>
+                            expanded
+                                ? [...prev, record.key]
+                                : prev.filter((k) => k !== record.key)
+                        );
+                    },
+                }}
+                onRow={(record) => ({
+                    onClick: () => handleRowClick(record),
+                    className: expandedRowKeys.includes(record.key)
+                        ? "basket-items-parent-row--expanded"
+                        : "",
+                })}
+                rowKey="key"
+                pagination={false}
+                size="middle"
+                tableLayout="fixed"
+            />
+        </div>
     );
 };
 

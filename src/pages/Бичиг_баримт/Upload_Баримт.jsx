@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Form, Input, Button, Select, DatePicker, Upload, message } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
+import axios from "axios";
 
 const { Option } = Select;
 
@@ -37,6 +38,7 @@ const Upload_Баримт = () => {
     const handleSubmit = async (values) => {
         if (mainFileList.length === 0) {
             message.error("Үндсэн файл сонгоно уу!");
+            return;
         }
         const formData = new FormData();
         formData.append("group", values.group);
@@ -68,14 +70,10 @@ const Upload_Баримт = () => {
             console.log("Attachment files:", attachmentFileList);
             console.log("Additional files:", additionalFileList);
 
-            const res = await fetch(`${API_BASE_URL}/post/upload`, {
-                method: "POST",
-                body: formData,
-            });
+            const res = await axios.post(`${API_BASE_URL}/post/upload`, formData);
+            const data = res.data || {};
 
-            const data = await res.json();
-
-            if (res.ok) {
+            if (res.status >= 200 && res.status < 300) {
                 message.success(data.message || "Файл илгээгдлээ");
 
                 form.resetFields(); // Clear input fields

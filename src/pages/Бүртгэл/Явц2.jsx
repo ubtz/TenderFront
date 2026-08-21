@@ -308,7 +308,7 @@ const Явц2 = () => {
                 open={!!selectedItem}
                 onClose={() => setSelectedItem(null)}
                 width="70vw"
-                destroyOnClose
+                destroyOnHidden
                 title={
                     selectedItem && (
                         <Space>

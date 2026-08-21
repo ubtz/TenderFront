@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
     Modal,
     Table,
@@ -6,14 +6,15 @@ import {
     Space,
     Spin,
     message,
-    Form,
     Input,
-    DatePicker,
-    Select,
     Card,
     Tree,
     Tooltip,
     Popconfirm,
+    Empty,
+    Tag,
+    Typography,
+    Segmented,
 } from "antd";
 import {
     ExclamationCircleOutlined,
@@ -26,12 +27,29 @@ import {
     CheckOutlined,
     CloseOutlined,
     ReloadOutlined,
+    CalendarOutlined,
+    SearchOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
 import dayjs from "dayjs";
+import PropTypes from "prop-types";
+import { updateOrderStatus } from "../../api/orders";
+import { createBasketItemPayload, getOrderIdentity } from "./order.utils";
 
-const { Option } = Select;
-const { Search } = Input;
+const { Text } = Typography;
+const basketYears = ["2025", "2026", "2027"];
+const toNumber = (value) => Number(String(value ?? "").replace(/,/g, "")) || 0;
+const calculateItemTotal = (item) => toNumber(item.price) * toNumber(item.qty);
+const getBasketYear = (basket) => {
+    const value = basket.publish_date || basket.set_date || basket.added_at;
+    const match = String(value || "").match(/^(\d{4})/);
+    return match?.[1] || "";
+};
+const createPlanRootNumber = () => {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return 1_000_000_000 + (values[0] % 1_000_000_000);
+};
 
 const MyModalWithTable = ({
     visible,
@@ -41,9 +59,13 @@ const MyModalWithTable = ({
     onInserted,   // ✅ new callback
 }) => {
     // --- config & user
-    const user = JSON.parse(localStorage.getItem("data") || "{}");
-    const envUrl = import.meta.env.VITE_API_URL;
-    // fallback to the IP used in your AddBasketModal if env not set
+    const user = useMemo(() => {
+        try {
+            return JSON.parse(localStorage.getItem("data") || "{}");
+        } catch {
+            return {};
+        }
+    }, []);
     const API_BASE_URL = import.meta.env.VITE_API_URL;
 
     // --- state
@@ -52,18 +74,9 @@ const MyModalWithTable = ({
     const [editingKey, setEditingKey] = useState(null);
     const [editingValue, setEditingValue] = useState("");
     const [loading, setLoading] = useState(false);
-    const [addFormVisible, setAddFormVisible] = useState(false);
-    const [form] = Form.useForm();
-    const [searchTerm, setSearchTerm] = useState("");
-
+    const [treeSearch, setTreeSearch] = useState("");
+    const [activeBasketYear, setActiveBasketYear] = useState("all");
     // --- helpers
-    const formatDate = useCallback((value) => (value ? value.split("T")[0] : ""), []);
-    const formatISO = useCallback((value) => {
-        if (!value) return null;
-        const d = new Date(value);
-        return isNaN(d) ? null : d.toISOString();
-    }, []);
-
     // --- fetch baskets and build tree (group by plan_root_number -> basket_type -> baskets)
     const fetchTreeData = useCallback(async () => {
         if (!user?.id) return;
@@ -71,11 +84,13 @@ const MyModalWithTable = ({
         try {
             const res = await axios.get(`${API_BASE_URL}/get/basket`);
             const allData = res.data || [];
-            const userData = allData.filter((b) => b.user_id === user.id);
+            const userData = allData.filter(
+                (basket) => String(basket.user_id) === String(user.id) && !basket.is_temp
+            );
 
             const plans = {};
             userData.forEach((item) => {
-                const planKey = item.plan_root_number ?? `plan_${Math.random()}`;
+                const planKey = item.plan_root_number ?? `unassigned-${item.plan_name || item.basket_id}`;
                 if (!plans[planKey]) {
                     plans[planKey] = {
                         key: `plan-${planKey}`,
@@ -105,10 +120,12 @@ const MyModalWithTable = ({
                 plan.childrenMap[typeKey].children.push({
                     key: `basket-${item.basket_id}`,
                     title: (item.basket_name || "Шинэ багц").trim(),
+                    name: (item.basket_name || "Шинэ багц").trim(),
                     type: "basket",
                     basket_id: item.basket_id,
                     plan_root_number: item.plan_root_number,
                     basket_type: item.basket_type,
+                    year: getBasketYear(item),
                     icon: <FileOutlined />,
                     raw: item,
                 });
@@ -122,16 +139,7 @@ const MyModalWithTable = ({
             // After building structured = Object.values(plans).map(...)
             setTreeData(structured);
 
-            // ✅ Automatically expand everything
-            const allKeys = [];
-            const collectKeys = (nodes) => {
-                nodes.forEach((n) => {
-                    allKeys.push(n.key);
-                    if (n.children && n.children.length) collectKeys(n.children);
-                });
-            };
-            collectKeys(structured);
-            setExpandedKeys(allKeys); // <-- expand all nodes
+            setExpandedKeys(structured.map((node) => node.key));
 
         } catch (err) {
             console.error("❌ fetchTreeData:", err);
@@ -145,14 +153,25 @@ const MyModalWithTable = ({
     useEffect(() => {
         if (visible) fetchTreeData();
         else {
-            // cleanup
             setTreeData([]);
             setExpandedKeys([]);
+            setTreeSearch("");
+            setActiveBasketYear("all");
+            setEditingKey(null);
+            setEditingValue("");
         }
     }, [visible, fetchTreeData]);
 
     // --- flatten items helper for confirmation table
     const getFlattenedSelected = useCallback(() => selectedRows.flatMap((r) => r.items || [r]), [selectedRows]);
+    const selectedSummary = useMemo(() => {
+        const items = selectedRows.flatMap((row) => row.items || [row]);
+        return {
+            itemCount: items.length,
+            packageCount: new Set(items.map((item) => `${item.pkgno}-${item.pkgdate}`)).size,
+            totalPrice: items.reduce((sum, item) => sum + calculateItemTotal(item), 0),
+        };
+    }, [selectedRows]);
 
     // --- INSERT logic (same as your previous handleConfirmInsert)
     const handleConfirmInsert = useCallback(
@@ -166,83 +185,85 @@ const MyModalWithTable = ({
             const hideMsg = message.loading("Өгөгдөл илгээж байна...");
             try {
                 // Step 1: unique pkg pairs
-                const pkgPairs = selectedRows.flatMap((row) =>
-                    (row.items || [row])
-                        .filter((item) => item.pkgno && item.pkgdate)
-                        .map((item) => ({ pkgno: item.pkgno, pkgdate: item.pkgdate }))
-                );
+                const items = selectedRows.flatMap((row) => row.items || [row]);
+                const pkgPairs = items
+                    .filter((item) => item.pkgno && item.pkgdate)
+                    .map((item) => ({ pkgno: item.pkgno, pkgdate: item.pkgdate }));
                 const uniquePkgPairs = Array.from(
                     new Map(pkgPairs.map((p) => [`${p.pkgno}_${p.pkgdate}`, p])).values()
                 );
 
                 // Step 2: send inserts in batches
-                const items = selectedRows.flatMap((r) => r.items || [r]);
                 const batchSize = 30;
-                for (let i = 0; i < items.length; i += batchSize) {
-                    const batch = items.slice(i, i + batchSize);
-                    await Promise.allSettled(
-                        batch.map((item) =>
-                            axios.post(`${API_BASE_URL}/post/PostBasketItems`, {
-                                basketId: basketRecord.basket_id,
-                                acct: item.acct,
-                                barcode: item.barcode,
-                                cdate: formatISO(item.cdate),
-                                ddate: formatISO(item.ddate),
-                                dedate: formatISO(item.dedate),
-                                udate: formatISO(item.udate),
-                                code: item.code,
-                                dcode: item.dcode,
-                                dname: item.dname,
-                                mdocno: item.mdocno,
-                                measid: item.measid,
-                                mname: item.mname,
-                                qty: item.qty?.toString() || "",
-                                price: item.price?.toString() || "",
-                                pricesum: item.pricesum?.toString() || "",
-                                pkgno: item.pkgno,
-                                pkgdate: item.pkgdate,
-                                planurl: item.planurl,
-                                techurl: item.techurl,
-                                techdate: item.techdate,
-                                plandate: item.plandate,
-                                usize: item.usize,
-                                rid: item.rid,
-                                zno: item.zno,
-                                cr1id: item.cr1id,
-                                cr1name: item.cr1name,
-                                cr2id: item.cr2id,
-                                cr3id: item.cr3id,
-                                cr4id: item.cr4id,
-                                cr4name: item.cr4name,
-                                crbrand: item.crbrand,
-                                crbrandname: item.crbrandname,
-                                crmark: item.crmark,
-                                crmarkname: item.crmarkname,
-                            })
-                        )
-                    );
+                const insertedItems = [];
+                const failedItems = [];
+                const persistedTempItems = items.every((item) => item.basketItemId);
+
+                if (persistedTempItems) {
+                    const moveResponse = await axios.put(`${API_BASE_URL}/put/MoveBasketItems`, {
+                        basket_item_ids: items.map((item) => item.basketItemId),
+                        target_basket_id: basketRecord.basket_id,
+                        user_id: user.id,
+                    });
+                    if (Number(moveResponse.data?.moved_count) !== items.length) {
+                        throw new Error("Selected basket items were not moved completely");
+                    }
+                    insertedItems.push(...items);
+                } else {
+                    for (let i = 0; i < items.length; i += batchSize) {
+                        const batch = items.slice(i, i + batchSize);
+                        const results = await Promise.allSettled(
+                            batch.map((item) =>
+                                axios.post(
+                                    `${API_BASE_URL}/post/PostBasketItems`,
+                                    createBasketItemPayload(item, basketRecord.basket_id)
+                                )
+                            )
+                        );
+
+                        results.forEach((result, resultIndex) => {
+                            const item = batch[resultIndex];
+                            if (result.status === "fulfilled") insertedItems.push(item);
+                            else failedItems.push(item);
+                        });
+                    }
+                }
+
+                if (!insertedItems.length) {
+                    throw new Error("No basket items were inserted");
                 }
 
                 // Step 3: status updates
-                await Promise.allSettled(
-                    uniquePkgPairs.map(async ({ pkgno, pkgdate }) => {
-                        const formattedDate = pkgdate.replace(/-/g, "/");
-                        await axios.post("http://192.168.4.107:8008/v1/orders/status", {
-                            Pkgno: pkgno,
-                            Pkgdate: formattedDate,
-                            State: "2",
-                        });
-                    })
+                const failedPackageKeys = new Set(
+                    failedItems.map((item) => `${item.pkgno}_${item.pkgdate}`)
                 );
+                const completedPkgPairs = uniquePkgPairs.filter(
+                    ({ pkgno, pkgdate }) => !failedPackageKeys.has(`${pkgno}_${pkgdate}`)
+                );
+                const statusResults = await Promise.allSettled(
+                    completedPkgPairs.map(({ pkgno, pkgdate }) =>
+                        updateOrderStatus(pkgno, pkgdate, "2")
+                    )
+                );
+                const failedStatusCount = statusResults.filter(
+                    (result) => result.status === "rejected"
+                ).length;
 
                 // Step 4: success & cleanup
-                message.success(
-                    `✅ ${selectedRows.length} мөр амжилттай нэмэгдлээ (${uniquePkgPairs.length} статус илгээгдлээ).`
-                );
-                removeInsertedRows(selectedRows);
+                removeInsertedRows(insertedItems);
                 await fetchTreeData();
-                // ✅ Notify parent (Багцлах.jsx)
-                if (typeof onInserted === "function") onInserted();
+                if (typeof onInserted === "function") await onInserted();
+
+                if (failedItems.length || failedStatusCount) {
+                    message.warning(
+                        `${insertedItems.length} мөр нэмэгдсэн, ${failedItems.length} мөр амжилтгүй, ${failedStatusCount} статус шинэчлэгдсэнгүй.`
+                    );
+                } else {
+                    message.success(
+                        `✅ ${insertedItems.length} мөр амжилттай нэмэгдлээ (${completedPkgPairs.length} статус илгээгдлээ).`
+                    );
+                    setVisible(false);
+                }
             } catch (err) {
                 console.error("❌ Insert error:", err);
                 message.error("⚠️ Зарим өгөгдлийг илгээхэд алдаа гарлаа!");
@@ -251,7 +272,7 @@ const MyModalWithTable = ({
                 setLoading(false);
             }
         },
-        [API_BASE_URL, selectedRows, removeInsertedRows, fetchTreeData, formatISO]
+        [API_BASE_URL, selectedRows, removeInsertedRows, fetchTreeData, onInserted, setVisible, user.id]
     );
 
     // --- When user clicks a basket node: show confirmation table then insert
@@ -262,45 +283,71 @@ const MyModalWithTable = ({
                 message.warning("Нэмэх өгөгдөл сонгоно уу!");
                 return;
             }
+            const packageCount = new Set(
+                flattened.map((item) => `${item.pkgno}-${item.pkgdate}`)
+            ).size;
+            const totalPrice = flattened.reduce(
+                (sum, item) => sum + calculateItemTotal(item),
+                0
+            );
+            const confirmationRows = flattened.map((item, index) => ({
+                ...item,
+                confirmationKey: `confirm-${item.basketItemId || item.reactKey || getOrderIdentity(item)}-${index}`,
+            }));
+            const basketName = basketNode.name || basketNode.raw?.basket_name || "Сонгосон багц";
             Modal.confirm({
-                title: "Мэдээлэл нэмэх",
+                title: `“${String(basketName).trim()}” багцад оруулах`,
                 icon: <ExclamationCircleOutlined />,
-                width: 900,
+                width: 1050,
                 centered: true,
                 content: (
-                    <div style={{ maxHeight: 400, overflowY: "auto" }}>
-                        <p>Та дараах өгөгдлийг оруулах уу?</p>
+                    <div>
+                        <Space wrap style={{ marginBottom: 12 }}>
+                            <Tag>{packageCount} багц</Tag>
+                            <Tag>{flattened.length} захиалга</Tag>
+                            <Tag color="green">{totalPrice.toLocaleString()} ₮</Tag>
+                        </Space>
                         <Table
-                            dataSource={flattened}
+                            dataSource={confirmationRows}
                             columns={[
-                                { title: "Нэр", dataIndex: "cr4name" },
-                                { title: "Салбар нэгж", dataIndex: "dname" },
-                                { title: "Марк", dataIndex: "crmarkname" },
-                                { title: "Нэгж", dataIndex: "mname", width: "10%" },
-                                { title: "Хэмжих нэгж", dataIndex: "usize", width: "15%" },
-                                { title: "Тоо", dataIndex: "qty" },
+                                { title: "Барааны нэр", dataIndex: "cr4name", width: 220, ellipsis: true },
+                                { title: "Марк", dataIndex: "crmarkname", width: 160, ellipsis: true },
+                                { title: "Зургийн №", dataIndex: "zno", width: 110, ellipsis: true },
+                                { title: "Нэгж", dataIndex: "usize", width: 90 },
+                                { title: "Хэмжих нэгж", dataIndex: "mname", width: 110 },
+                                {
+                                    title: "Тоо",
+                                    dataIndex: "qty",
+                                    width: 90,
+                                    align: "right",
+                                    render: (value) => toNumber(value).toLocaleString(),
+                                },
                                 {
                                     title: "Нэгж үнэ",
                                     dataIndex: "price",
-                                    render: (val) => (val ? Number(val).toLocaleString("en-US") : "-"),
+                                    width: 130,
+                                    align: "right",
+                                    render: (value) => `${toNumber(value).toLocaleString()} ₮`,
                                 },
                                 {
                                     title: "Нийт үнэ",
-                                    dataIndex: "pricesum",
-                                    render: (val) => (val ? Number(val).toLocaleString("en-US") : "-"),
+                                    key: "totalPrice",
+                                    width: 145,
+                                    align: "right",
+                                    render: (_, item) => (
+                                        <Text strong>{calculateItemTotal(item).toLocaleString()} ₮</Text>
+                                    ),
                                 },
                             ]}
-                            pagination={false}
+                            pagination={flattened.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
                             size="small"
-                            bordered
-                            rowKey={(r, idx) =>
-                                `${r.code || idx}-${r.dname || ""}-${r.qty || 0}-${r.price || 0}`
-                            }
+                            scroll={{ x: 1050, y: 360 }}
+                            rowKey="confirmationKey"
                         />
                     </div>
                 ),
-                okText: "Тийм",
-                cancelText: "Үгүй",
+                okText: "Багцад оруулах",
+                cancelText: "Болих",
                 onOk: () => handleConfirmInsert(basketNode.raw || basketNode),
             });
         },
@@ -320,7 +367,6 @@ const MyModalWithTable = ({
                     ...payload,
                     userId: user.id,
                 };
-                console.log("Posting basket:", full);
                 await axios.post(`${API_BASE_URL}/post/addBasket`, full);
                 message.success("✅ Амжилттай нэмэгдлээ!");
                 await fetchTreeData();
@@ -347,7 +393,7 @@ const MyModalWithTable = ({
                 // add plan
                 const payload = {
                     planName: "Шинэ төлөвлөгөө",
-                    planRootNumber: Math.floor(Math.random() * 100000),
+                    planRootNumber: createPlanRootNumber(),
                     basketType: "Ангилал",
                     basketName: "Багц",
                     basketNumber: 1,
@@ -379,29 +425,16 @@ const MyModalWithTable = ({
                     planRootNumber: node.plan_root_number,
                     basketType: node.basket_type,
                     basketName: "Шинэ багц",
-                    basketNumber: Math.floor(Math.random() * 100),
+                    basketNumber: 1,
                     publishDate: today,
                     setDate: nextWeek,
                 };
-                console.log("ENE AJILLAA", node);
                 await postBasket(payload);
                 return;
             }
         },
         [postBasket]
     );
-    const checkBasketHasItems = async (basketId) => {
-        try {
-            const res = await axios.get(`${API_BASE_URL}/get/Items`);
-            const items = res.data || [];
-            const hasItems = items.some((i) => i.basketId === basketId);
-            return hasItems;
-        } catch (err) {
-            console.error("❌ checkBasketHasItems:", err);
-            return false;
-        }
-    };
-
     // --- delete node (plan/type/basket)
     const deleteNode = useCallback(
         async (node) => {
@@ -417,7 +450,9 @@ const MyModalWithTable = ({
 
                 // 🧩 1️⃣ Check based on node type
                 if (node.type === "basket") {
-                    const basketItems = items.filter((i) => i.basketId === node.basket_id);
+                    const basketItems = items.filter(
+                        (item) => String(item.basketId) === String(node.basket_id)
+                    );
                     hasItems = basketItems.length > 0;
                     totalCount = basketItems.length;
                 }
@@ -428,7 +463,9 @@ const MyModalWithTable = ({
                         .find((t) => t.key === node.key)?.children || [];
 
                     const basketIds = allTypeBaskets.map((b) => b.basket_id);
-                    const typeItems = items.filter((i) => basketIds.includes(i.basketId));
+                    const typeItems = items.filter((item) =>
+                        basketIds.some((basketId) => String(basketId) === String(item.basketId))
+                    );
                     hasItems = typeItems.length > 0;
                     totalCount = typeItems.length;
                 }
@@ -440,7 +477,9 @@ const MyModalWithTable = ({
                         typeNode.children?.forEach((b) => allBasketIds.push(b.basket_id));
                     });
 
-                    const planItems = items.filter((i) => allBasketIds.includes(i.basketId));
+                    const planItems = items.filter((item) =>
+                        allBasketIds.some((basketId) => String(basketId) === String(item.basketId))
+                    );
                     hasItems = planItems.length > 0;
                     totalCount = planItems.length;
                 }
@@ -465,37 +504,24 @@ const MyModalWithTable = ({
                 payload.basket_type = node.basket_type;
             } else if (node.type === "basket") payload.basket_id = node.basket_id;
 
-            // 🧨 Ask confirmation before delete
-            Modal.confirm({
-                title: "Устгах уу?",
-                content: `Та "${node.title}"-г устгахдаа итгэлтэй байна уу?`,
-                okText: "Тийм",
-                cancelText: "Үгүй",
-                centered: true,
-                onOk: async () => {
-                    try {
-                        setLoading(true);
-                        const res = await axios.delete(`${API_BASE_URL}/delete/deleteBasket`, {
-                            data: payload,
-                            headers: { "Content-Type": "application/json" },
-                        });
-                        if (res?.data?.message)
-                            message.success(`✅ ${res.data.message}`);
-                        else
-                            message.success("✅ Амжилттай устгагдлаа!");
-                        await fetchTreeData(); // refresh tree
-                    } catch (err) {
-                        console.error("❌ deleteNode:", err);
-                        const backendMsg =
-                            err?.response?.data?.error ||
-                            err?.response?.data?.message ||
-                            "Устгах үед алдаа гарлаа!";
-                        message.error(`⚠️ ${backendMsg}`);
-                    } finally {
-                        setLoading(false);
-                    }
-                },
-            });
+            try {
+                setLoading(true);
+                const res = await axios.delete(`${API_BASE_URL}/delete/deleteBasket`, {
+                    data: payload,
+                    headers: { "Content-Type": "application/json" },
+                });
+                message.success(res?.data?.message || "Амжилттай устгагдлаа!");
+                await fetchTreeData();
+            } catch (err) {
+                console.error("❌ deleteNode:", err);
+                const backendMsg =
+                    err?.response?.data?.error ||
+                    err?.response?.data?.message ||
+                    "Устгах үед алдаа гарлаа!";
+                message.error(backendMsg);
+            } finally {
+                setLoading(false);
+            }
         },
         [API_BASE_URL, fetchTreeData, user?.id, treeData]
     );
@@ -563,21 +589,27 @@ const MyModalWithTable = ({
     }, []);
 
     // --- utilities for rendering tree title with actions
-    const handleClickName = useCallback((node, e) => {
-        // If clicked basket title, trigger insertion confirmation
+    const handleNodeAction = useCallback((node) => {
         if (node.type === "basket") {
             handleClickBasket(node);
             return;
         }
-        // else toggle expand
+
         const isExpanded = expandedKeys.includes(node.key);
         if (isExpanded) setExpandedKeys((prev) => prev.filter((k) => k !== node.key));
         else setExpandedKeys((prev) => [...prev, node.key]);
     }, [expandedKeys, handleClickBasket]);
 
+    const handleTreeSelect = useCallback((_, info) => {
+        if (!info?.node) return;
+        handleNodeAction(info.node);
+    }, [handleNodeAction]);
+
     const renderTitle = useCallback(
         (node) => (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div
+                className={`basket-picker-node basket-picker-node--${node.type}`}
+            >
                 {editingKey === node.key ? (
                     <>
                         <Input
@@ -608,15 +640,16 @@ const MyModalWithTable = ({
                     </>
                 ) : (
                     <>
-                        <span
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleClickName(node, e);
-                            }}
-                            style={{ cursor: "pointer", minWidth: 200, display: "inline-block" }}
-                        >
+                        <span className="basket-picker-node__title">
                             {node.title}
                         </span>
+
+                        {node.type === "basket" && (
+                            <>
+                                {node.year && <Tag bordered={false}>{node.year}</Tag>}
+                                <Tag bordered={false} color="green">Сонгох</Tag>
+                            </>
+                        )}
 
                         <Tooltip title="Нэр өөрчлөх">
                             <Button
@@ -674,184 +707,151 @@ const MyModalWithTable = ({
             startEditing,
             handleAddNode,
             deleteNode,
-            handleClickName,
         ]
     );
 
     const decorateTree = useCallback(
         (list) =>
-            list
-                .filter((n) => (searchTerm ? n.title?.toLowerCase().includes(searchTerm.toLowerCase()) : true))
-                .map((item) => ({
-                    ...item,
-                    title: renderTitle(item),
-                    children: item.children ? decorateTree(item.children) : [],
-                })),
-        [renderTitle, searchTerm]
+            list.map((item) => ({
+                ...item,
+                title: renderTitle(item),
+                children: item.children ? decorateTree(item.children) : [],
+            })),
+        [renderTitle]
     );
 
-    // --- Table columns (kept for optional view or debugging)
-    const columns = useMemo(
-        () => [
-            { title: "Огноо", dataIndex: "set_date", render: (val) => formatDate(val), width: 100 },
-            { title: "Төлөвлөгөөний нэр", dataIndex: "plan_name", width: 300 },
-            { title: "Төлөвлөгөөний дугаар", dataIndex: "plan_root_number", width: 120 },
-            { title: "Ангилал", dataIndex: "basket_type", width: 140 },
-            { title: "Тендер зарлах огноо", dataIndex: "publish_date", render: formatDate, width: 140 },
-            { title: "Багцын дугаар", dataIndex: "basket_number", width: 120 },
-            { title: "Багцын нэр", dataIndex: "basket_name", width: 200 },
-            {
-                title: "Үйлдэл",
-                key: "action",
-                width: 120,
-                render: (_, record) => (
-                    <Button
-                        style={{ width: 100 }}
-                        type="primary"
-                        size="small"
-                        disabled={!selectedRows?.length}
-                        onClick={() => {
-                            // If you prefer table-based add to basket you can still use this
-                            Modal.confirm({
-                                title: "Мэдээлэл нэмэх",
-                                icon: <ExclamationCircleOutlined />,
-                                width: 900,
-                                centered: true,
-                                content: (
-                                    <div style={{ maxHeight: 400, overflowY: "auto" }}>
-                                        <p>Та дараах өгөгдлийг оруулах уу?</p>
-                                        <Table
-                                            dataSource={getFlattenedSelected()}
-                                            columns={[
-                                                { title: "Нэр", dataIndex: "cr4name" },
-                                                { title: "Салбар нэгж", dataIndex: "dname" },
-                                                { title: "Марк", dataIndex: "crmarkname" },
-                                                { title: "Нэгж", dataIndex: "mname", width: "10%" },
-                                                { title: "Хэмжих нэгж", dataIndex: "usize", width: "15%" },
-                                                { title: "Тоо", dataIndex: "qty" },
-                                                {
-                                                    title: "Нэгж үнэ",
-                                                    dataIndex: "price",
-                                                    render: (val) => (val ? Number(val).toLocaleString("en-US") : "-"),
-                                                },
-                                                {
-                                                    title: "Нийт үнэ",
-                                                    dataIndex: "pricesum",
-                                                    render: (val) => (val ? Number(val).toLocaleString("en-US") : "-"),
-                                                },
-                                            ]}
-                                            pagination={false}
-                                            size="small"
-                                            bordered
-                                            rowKey={(r, idx) =>
-                                                `${r.code || idx}-${r.dname || ""}-${r.qty || 0}-${r.price || 0}`
-                                            }
-                                        />
-                                    </div>
-                                ),
-                                okText: "Тийм",
-                                cancelText: "Үгүй",
-                                onOk: () => handleConfirmInsert(record),
-                            });
-                        }}
-                    >
-                        Нэмэх
-                    </Button>
-                ),
-            },
-        ],
-        [selectedRows, handleConfirmInsert]
-    );
+    const filteredTreeData = useMemo(() => {
+        const query = treeSearch.trim().toLocaleLowerCase();
+
+        const filterNodes = (nodes) => nodes.flatMap((node) => {
+            const children = filterNodes(node.children || []);
+            if (node.type === "basket" && activeBasketYear !== "all" && node.year !== activeBasketYear) {
+                return [];
+            }
+            const matches = String(node.title || "").toLocaleLowerCase().includes(query);
+            if (node.type === "basket") return !query || matches ? [{ ...node, children }] : [];
+            if (activeBasketYear !== "all" && !children.length) return [];
+            return !query || matches || children.length ? [{ ...node, children }] : [];
+        });
+
+        return filterNodes(treeData);
+    }, [activeBasketYear, treeData, treeSearch]);
+
+    const filteredBasketCount = useMemo(() => {
+        let count = 0;
+        const visit = (nodes) => nodes.forEach((node) => {
+            if (node.type === "basket") count += 1;
+            visit(node.children || []);
+        });
+        visit(filteredTreeData);
+        return count;
+    }, [filteredTreeData]);
+
+    useEffect(() => {
+        if (!treeSearch.trim()) return;
+        const keys = [];
+        const collectKeys = (nodes) => nodes.forEach((node) => {
+            keys.push(node.key);
+            collectKeys(node.children || []);
+        });
+        collectKeys(filteredTreeData);
+        setExpandedKeys(keys);
+    }, [filteredTreeData, treeSearch]);
 
     return (
         <>
             {/* Main modal shows tree */}
             <Modal
-                title="Төлөвлөгөө → Ангилал → Багц"
+                title={(
+                    <div className="basket-picker-title">
+                        <div className="basket-picker-title__icon"><FolderOpenOutlined /></div>
+                        <div>
+                            <div className="basket-picker-title__text">Багц сонгох</div>
+                            <div className="basket-picker-title__subtitle">Сонгосон захиалгыг оруулах төлөвлөгөө, багцаа сонгоно уу</div>
+                        </div>
+                    </div>
+                )}
                 open={visible}
                 onCancel={() => setVisible(false)}
                 footer={null}
-                width={800}
+                width={1040}
+                centered
+                className="basket-picker-modal"
                 getContainer={false}
-                destroyOnClose
+                destroyOnHidden
             >
-                <Space style={{ marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
-                    <Space>
+                <div className="basket-picker-summary">
+                    <div className="basket-picker-summary__item"><span>Сонгосон багц</span><strong>{selectedSummary.packageCount}</strong></div>
+                    <div className="basket-picker-summary__item"><span>Захиалга</span><strong>{selectedSummary.itemCount}</strong></div>
+                    <div className="basket-picker-summary__item basket-picker-summary__item--amount"><span>Нийт дүн</span><strong>{selectedSummary.totalPrice.toLocaleString()} ₮</strong></div>
+                </div>
+
+                <div className="basket-picker-toolbar">
+                    <Input
+                        allowClear
+                        prefix={<SearchOutlined />}
+                        placeholder="Төлөвлөгөө, ангилал, багц хайх..."
+                        value={treeSearch}
+                        onChange={(event) => setTreeSearch(event.target.value)}
+                        className="basket-picker-search"
+                    />
+                    <div className="basket-picker-year-filter">
+                        <span><CalendarOutlined /> Он</span>
+                        <Segmented
+                            value={activeBasketYear}
+                            onChange={setActiveBasketYear}
+                            options={[
+                                { label: "Бүгд", value: "all" },
+                                ...basketYears.map((year) => ({ label: year, value: year })),
+                            ]}
+                        />
+                    </div>
+                    <Space className="basket-picker-toolbar__actions">
                         <Button type="primary" onClick={() => handleAddNode(null)}>
-                            ➕ Төлөвлөгөө нэмэх
+                            Төлөвлөгөө нэмэх
                         </Button>
                         <Button icon={<ReloadOutlined />} onClick={fetchTreeData}>
                             Шинэчлэх
                         </Button>
                     </Space>
-
-                </Space>
+                </div>
 
                 <Spin spinning={loading} tip="Мэдээлэл татаж байна...">
-                    <Card bodyStyle={{ maxHeight: 520, overflowY: "auto" }}>
-                        <Tree
-                            showIcon
-                            expandedKeys={expandedKeys}
-                            onExpand={setExpandedKeys}
-                            treeData={decorateTree(treeData)}
-                            selectable={false}
-                            defaultExpandAll={false}
-                        />
+                    <Card className="basket-picker-tree-card" styles={{ body: { padding: 0 } }}>
+                        <div className="basket-picker-tree-card__header">
+                            <div><strong>Таны багцууд</strong><span>Багцын нэр дээр дарж сонгоно уу</span></div>
+                            <Tag bordered={false} color="blue">{filteredBasketCount} багц</Tag>
+                        </div>
+                        <div className="basket-picker-tree-card__body">
+                        {filteredTreeData.length ? (
+                            <Tree
+                                showIcon
+                                blockNode
+                                selectable
+                                expandedKeys={expandedKeys}
+                                onExpand={setExpandedKeys}
+                                onSelect={handleTreeSelect}
+                                selectedKeys={[]}
+                                treeData={decorateTree(filteredTreeData)}
+                                defaultExpandAll={false}
+                            />
+                        ) : (
+                            <Empty description={treeSearch || activeBasketYear !== "all" ? "Шүүлтүүрт тохирох багц олдсонгүй" : "Багц байхгүй"} />
+                        )}
+                        </div>
                     </Card>
                 </Spin>
             </Modal>
-
-            {/* Inline add-basket form modal (if you want to create with custom fields) */}
-            <Modal
-                title="Шинэ багц нэмэх"
-                open={addFormVisible}
-                onCancel={() => setAddFormVisible(false)}
-                onOk={async () => {
-                    try {
-                        const values = await form.validateFields();
-                        setAddFormVisible(false);
-                        form.resetFields();
-                        // prepare payload similar to previous AddBasketModal
-                        const payload = {
-                            planName: values.plan_name || values.basket_name,
-                            planRootNumber: values.plan_root_number || Math.floor(Math.random() * 100000),
-                            basketType: values.basket_type,
-                            basketName: values.basket_name,
-                            basketNumber: values.basket_number || 1,
-                            publishDate: values.publish_date ? values.publish_date.format("YYYY-MM-DD") : undefined,
-                            setDate: values.set_date ? values.set_date.format("YYYY-MM-DD") : undefined,
-                        };
-                        await postBasket(payload);
-                    } catch (err) {
-                        // validation or post error handled inside postBasket
-                    }
-                }}
-                centered
-            >
-                <Form layout="vertical" form={form}>
-                    <Form.Item name="basket_name" label="Багцын нэр" rules={[{ required: true }]}>
-                        <Input />
-                    </Form.Item>
-                    <Form.Item name="basket_number" label="Багцын дугаар">
-                        <Input />
-                    </Form.Item>
-                    <Form.Item name="plan_name" label="Төлөвлөгөөний нэр">
-                        <Input />
-                    </Form.Item>
-                    <Form.Item name="publish_date" label="Тендер зарлах огноо">
-                        <DatePicker style={{ width: "100%" }} />
-                    </Form.Item>
-                    <Form.Item name="basket_type" label="Ангилал" rules={[{ required: true }]}>
-                        <Select>
-                            <Option value="Тендер">Тендер</Option>
-                            <Option value="Бараа">Бараа</Option>
-                            <Option value="Үйлчилгээ">Үйлчилгээ</Option>
-                        </Select>
-                    </Form.Item>
-                </Form>
-            </Modal>
         </>
     );
+};
+
+MyModalWithTable.propTypes = {
+    visible: PropTypes.bool.isRequired,
+    setVisible: PropTypes.func.isRequired,
+    selectedRows: PropTypes.arrayOf(PropTypes.object).isRequired,
+    removeInsertedRows: PropTypes.func.isRequired,
+    onInserted: PropTypes.func,
 };
 
 export default MyModalWithTable;

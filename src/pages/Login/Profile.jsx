@@ -45,11 +45,6 @@ const Profile = () => {
 
         try {
             setLoading(true);
-            console.log("📤 Sending payload:", {
-                userId: user.id, // check this carefully
-                oldPassword,
-                newPassword,
-            });
             const res = await axios.post(`${API_BASE_URL}/post/UserPasswordChange`, {
                 userId: user.id,
                 oldPassword,

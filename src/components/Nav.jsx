@@ -1,8 +1,7 @@
-import React, { useState, useContext } from "react";
+import { useState, useContext } from "react";
 import { Layout, Menu, Modal } from "antd";
 import {
   HomeOutlined,
-  UserOutlined,
   FileTextOutlined,
   SettingOutlined,
   BarChartOutlined,
@@ -11,13 +10,12 @@ import { useNavigate, Link } from "react-router-dom";
 import DirtyContext from "../context/DirtyContext";
 import logo from "../assets/logo4.png";
 import "./styles.css";
+import { getSessionRole } from "../api/session";
 
 const { Sider } = Layout;
 
 function Nav() {
-  const userJson = localStorage.getItem("data");
-  const user = userJson ? JSON.parse(userJson) : null;
-  const accessType = user?.erh; // 👈 e.g. "Удирдлага", "Тендер мэргэжилтэн", "Гэрээний мэргэжилтэн"
+  const accessType = getSessionRole();
 
   const [collapsed, setCollapsed] = useState(false);
   const [openKeys, setOpenKeys] = useState([]);
@@ -157,7 +155,10 @@ function Nav() {
       key: "settings",
       icon: <SettingOutlined />,
       label: "Тохиргоо",
-      children: [{ key: "profile", label: <Link to="/profile">Профайл тохиргоо</Link> },],
+      children: [
+        { key: "profile", label: <Link to="/profile">Профайл тохиргоо</Link> },
+        { key: "measure-units", label: <Link to="/Хэмжих-нэгж">Хэмжих нэгж</Link> },
+      ],
     },
   ];
 

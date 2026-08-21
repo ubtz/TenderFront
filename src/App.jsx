@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { Layout, Avatar, message, Dropdown, Typography } from "antd";
 import {
@@ -9,33 +9,38 @@ import {
 
 import Nav from "./components/Nav";
 import DirtyContext from "./context/DirtyContext";
+import {
+  getSessionRole,
+  logoutSession,
+  startSessionHeartbeat,
+} from "./api/session";
 
-// Pages
-import Home from "./pages/Home";
-import Login from "./pages/Login/Login";
-import Register from "./pages/Register/Register";
-import NotFoundPage from "./pages/NotFoundPage";
-import Тайлан from "./pages/Тайлан/Тайлан";
-import Upload_Баримт from "./pages/Бичиг_баримт/Upload_Баримт";
-import Бусад from "./pages/Бичиг_баримт/Бусад";
-import Тушаал from "./pages/Бичиг_баримт/Тушаал";
-import Цахилгаан from "./pages/Бичиг_баримт/Цахилгаан";
-import Төлөвлөгөө from "./pages/Бүртгэл/Төлөвлөгөө";
-import Хяналт from "./pages/Бүртгэл/Хяналт";
-import Захиалга_Бүртгэх from "./pages/Бүртгэл/Захиалга_бүртгэх";
-import Багцлах from "./pages/Бүртгэл/Багцлах";
 import PrivateRoute from "./components/PrivateRoute";
-import Tender_Бүртгэх from "./pages/Бүртгэл/Tender_Бүртгэх";
-import Гэрээ_Бүртгэх from "./pages/Бүртгэл/Гэрээ_бүртгэх";
-import Tender from "./pages/Tender/Tender";
-import Tender2 from "./pages/Бүртгэл/Tender";
 
-import Profile from "./pages/Login/Profile";
-import UsersPanel from "./pages/Login/UsersPanel";
-import InventoryReportForm from "./pages/Бүртгэл/InventoryReportForm";
-import Явц1 from "./pages/Бүртгэл/Явц1";
-import Явц2 from "./pages/Бүртгэл/Явц2";
-import ЯвцMain from "./pages/Бүртгэл/ЯвцMain";
+const Home = lazy(() => import("./pages/Home"));
+const Login = lazy(() => import("./pages/Login/Login"));
+const Register = lazy(() => import("./pages/Register/Register"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const Тайлан = lazy(() => import("./pages/Тайлан/Тайлан"));
+const Upload_Баримт = lazy(() => import("./pages/Бичиг_баримт/Upload_Баримт"));
+const Бусад = lazy(() => import("./pages/Бичиг_баримт/Бусад"));
+const Тушаал = lazy(() => import("./pages/Бичиг_баримт/Тушаал"));
+const Цахилгаан = lazy(() => import("./pages/Бичиг_баримт/Цахилгаан"));
+const Төлөвлөгөө = lazy(() => import("./pages/Бүртгэл/Төлөвлөгөө"));
+const Хяналт = lazy(() => import("./pages/Бүртгэл/Хяналт"));
+const Багцлах = lazy(() => import("./pages/Бүртгэл/Багцлах"));
+const Tender_Бүртгэх = lazy(() => import("./pages/Бүртгэл/Tender_Бүртгэх"));
+const Гэрээ_Бүртгэх = lazy(() => import("./pages/Бүртгэл/Гэрээ_Бүртгэх"));
+const Tender = lazy(() => import("./pages/Tender/Tender"));
+const Tender2 = lazy(() => import("./pages/Бүртгэл/Tender"));
+const Profile = lazy(() => import("./pages/Login/Profile"));
+const MeasureUnits = lazy(() => import("./pages/Тохиргоо.jsx/ХэмжихНэгж"));
+const UsersPanel = lazy(() => import("./pages/Login/UsersPanel"));
+const TotalOrders = lazy(() => import("./pages/Login/TotalOrders"));
+const InventoryReportForm = lazy(() => import("./pages/Бүртгэл/InventoryReportForm"));
+const Явц1 = lazy(() => import("./pages/Бүртгэл/Явц1"));
+const Явц2 = lazy(() => import("./pages/Бүртгэл/Явц2"));
+const ЯвцMain = lazy(() => import("./pages/Бүртгэл/ЯвцMain"));
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -44,15 +49,20 @@ function App() {
   const [isDirty, setIsDirty] = useState(false);
   const navigate = useNavigate();
 
-  // 🔹 Load user info & access type
-  const userJson = localStorage.getItem("data");
-  const user = userJson ? JSON.parse(userJson) : null;
-  const accessType = user?.erh; // e.g. "Удирдлага", "Тендер мэргэжилтэн", "Гэрээний мэргэжилтэн"
-  console.log("User access type:", accessType);
-  const handleMenuClick = ({ key }) => {
+  useEffect(() => {
+    return startSessionHeartbeat(() => {
+      message.error("Сесс дууссан тул дахин нэвтэрнэ үү");
+      navigate("/login", { replace: true });
+    });
+  }, [navigate]);
+
+  const accessType = getSessionRole();
+  const handleMenuClick = async ({ key }) => {
     if (key === "1") navigate("/profile");
     if (key === "2") {
+      await logoutSession().catch(() => {});
       localStorage.removeItem("token");
+      localStorage.removeItem("data");
       message.success("Амжилттай гарлаа!");
       navigate("/login");
     }
@@ -110,6 +120,7 @@ function App() {
 
           {/* ✅ Main content */}
           <Content style={{ padding: "1.5rem" }}>
+            <Suspense fallback={<div style={{ padding: 24 }}>Уншиж байна...</div>}>
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<Login />} />
@@ -121,6 +132,14 @@ function App() {
                 element={
                   <PrivateRoute>
                     <Profile />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/Хэмжих-нэгж"
+                element={
+                  <PrivateRoute>
+                    <MeasureUnits />
                   </PrivateRoute>
                 }
               />
@@ -164,8 +183,9 @@ function App() {
               {/* ===================== УДИРДЛАГА ===================== */}
               {accessType === "Удирдлага" && (
                 <>
-                  <Route path="/register" element={<Register />} />
-                  <Route path="/users_panel" element={<UsersPanel />} />
+                  <Route path="/register" element={<PrivateRoute allowedRoles={["Удирдлага"]}><Register /></PrivateRoute>} />
+                  <Route path="/users_panel" element={<PrivateRoute allowedRoles={["Удирдлага"]}><UsersPanel /></PrivateRoute>} />
+                  <Route path="/TotalOrders" element={<PrivateRoute><TotalOrders /></PrivateRoute>} />
                   <Route
                     path="/Тайлан"
                     element={
@@ -260,6 +280,7 @@ function App() {
               {/* ===================== ТЕНДЕР МЭРГЭЖИЛТЭН ===================== */}
               {accessType === "Тендер мэргэжилтэн" && (
                 <>
+                  <Route path="/TotalOrders" element={<PrivateRoute><TotalOrders /></PrivateRoute>} />
                   <Route
                     path="/Тайлан"
                     element={
@@ -300,7 +321,7 @@ function App() {
                       </PrivateRoute>
                     }
                   />
-                   <Route
+                  <Route
                     path="/Tender2"
                     element={
                       <PrivateRoute>
@@ -401,6 +422,7 @@ function App() {
               {/* Fallback */}
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
+            </Suspense>
           </Content>
         </Layout>
       </Layout>

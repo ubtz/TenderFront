@@ -136,7 +136,7 @@ const UsersPanel = () => {
     const handleResetPassword = async (record) => {
         Modal.confirm({
             title: "Та нууц үгийг шинэчлэх үү?",
-            content: `${record.ner} (${record.email}) хэрэглэгчийн нууц үг шинэчлэгдэх бөгөөд анхны нууц үг 1234 болно.`,
+            content: `${record.ner} (${record.email}) хэрэглэгчид нэг удаагийн түр нууц үг үүсгэнэ.`,
             okText: "Тийм",
             cancelText: "Болих",
             onOk: async () => {
@@ -144,7 +144,10 @@ const UsersPanel = () => {
                     const res = await axios.post(`${API_BASE_URL}/post/UserPasswordRenew`, {
                         userId: record.id,
                     });
-                    message.success(res.data?.message || "Нууц үг амжилттай шинэчлэгдлээ (1234)");
+                    Modal.success({
+                        title: "Түр нууц үг үүслээ",
+                        content: `Хэрэглэгчид дамжуулах нууц үг: ${res.data?.temporary_password || "-"}`,
+                    });
                 } catch (error) {
                     console.error("❌ Reset password error:", error);
                     message.error("Нууц үг шинэчлэхэд алдаа гарлаа");

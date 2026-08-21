@@ -13,9 +13,8 @@ const Register = () => {
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        fetch(`${API_BASE_URL}/get/branches`)
-            .then((res) => res.json())
-            .then((data) => setBranches(data))
+        axios.get(`${API_BASE_URL}/get/branches`)
+            .then((res) => setBranches(res.data || []))
             .catch(() => setBranches([]));
     }, []);
 
@@ -30,29 +29,9 @@ const Register = () => {
         try {
             setLoading(true);
 
-            // 1️⃣ Login to external API
-            const loginRes = await axios.post("http://192.168.4.103:8010/external/login", {
-                username: "tender",
-                password: "m$T8]pQ!v2{Rg#5A(zk,7^Xw)C@u",
-            });
-
-            const token = loginRes.data?.token;
-            if (!token) throw new Error("Token not received");
-
-            // 2️⃣ Get employee info by regno
-            const empRes = await axios.post(
-                "http://192.168.4.103:8010/api/tender/employee",
-                { regno },
-                {
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                }
-            );
+            const empRes = await axios.post(`${API_BASE_URL}/external/employee`, { regno });
 
             const emp = empRes.data;
-            console.log("👤 Employee info:", emp);
-
             // 3️⃣ Fill form fields from response
             form.setFieldsValue({
                 ovog: emp.lname || "",

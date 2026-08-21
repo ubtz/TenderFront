@@ -1,576 +1,657 @@
-import React, { useEffect, useState } from "react";
-import { Table, Input, Button, Space, Modal, message, Checkbox } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+    Button,
+    Card,
+    Checkbox,
+    Empty,
+    Input,
+    Modal,
+    Space,
+    Spin,
+    Table,
+    Tag,
+    Typography,
+    message,
+} from "antd";
+import {
+    CalendarOutlined,
+    FileAddOutlined,
+    FolderOpenOutlined,
+    LockOutlined,
+    ProjectOutlined,
+    ReloadOutlined,
+    SearchOutlined,
+} from "@ant-design/icons";
 import axios from "axios";
-import Highlighter from "react-highlight-words";
-import Tablez from "./Table";
-import { DeleteOutlined } from "@ant-design/icons";
-import PrintIcon from "./PrintIcon"; // Adjust the import path as needed
-import BasketItemsDetails from "./BasketItemsDetails";
+import PrintIcon from "./PrintIcon";
 import ТөлөвлөгөөItemDetails from "./ТөлөвлөгөөItemDetails";
-import { useMemo } from "react";
+import "./Төлөвлөгөө_table.css";
 
-function ТөлөвлөгөөTable() {
+const API_BASE_URL = import.meta.env.VITE_API_URL;
+const { Text } = Typography;
+
+const unwrap = (value) => {
+    if (!value || typeof value !== "object") return value;
+    for (const key of ["String", "Int64", "Float64", "Bool", "Time"]) {
+        if (value[key] !== undefined && value[key] !== null) return value[key];
+    }
+    return "";
+};
+const normalize = (value) => String(unwrap(value) ?? "").trim();
+const toNumber = (value) => Number(normalize(value).replace(/,/g, "")) || 0;
+const itemTotal = (item) => toNumber(item.price) * toNumber(item.qty);
+const formatNumber = (value) => toNumber(value).toLocaleString();
+const formatDate = (value) => {
+    const normalized = normalize(value);
+    if (!normalized) return "-";
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? normalized : date.toLocaleDateString("mn-MN");
+};
+const getDateYear = (value) => normalize(value).match(/^(\d{4})/)?.[1] || "";
+
+const ТөлөвлөгөөTable = () => {
+    const user = useMemo(() => {
+        try {
+            return JSON.parse(localStorage.getItem("data") || "{}");
+        } catch {
+            return {};
+        }
+    }, []);
+    const isManager = normalize(user?.erh || user?.Erh).toLocaleLowerCase() === "удирдлага";
+
     const [data, setData] = useState([]);
+    const [users, setUsers] = useState([]);
+    const [branches, setBranches] = useState([]);
+    const [loading, setLoading] = useState(false);
     const [searchText, setSearchText] = useState("");
-    const [columnFilters, setColumnFilters] = useState({});
-
-    const API_BASE_URL = import.meta.env.VITE_API_URL;
-    const [modalVisible, setModalVisible] = useState(false);
-    const [currentRecord, setCurrentRecord] = useState(null);
-    const [tenderNumber, setTenderNumber] = useState("");
-    const [selectedBaskets, setSelectedBaskets] = useState([]);
-
-    const userJson = localStorage.getItem("data");
-    const user = userJson ? JSON.parse(userJson) : null;
-    console.log("User in ТөлөвлөгөөTable:", user);
-    const [usersinfo, setUsers] = useState([]);
-    const [userinfo, setUser] = useState(null); // currently logged-in user
-    const [expandedRowKeys, setExpandedRowKeys] = useState([]);
+    const [activeYear, setActiveYear] = useState("all");
+    const [expandedPlanKeys, setExpandedPlanKeys] = useState([]);
     const [expandedBasketKeys, setExpandedBasketKeys] = useState([]);
+
+    const [tenderModalOpen, setTenderModalOpen] = useState(false);
+    const [tenderLoading, setTenderLoading] = useState(false);
+    const [tenderOptionsLoading, setTenderOptionsLoading] = useState(false);
+    const [currentPlan, setCurrentPlan] = useState(null);
+    const [tenderNumber, setTenderNumber] = useState("");
+    const [selectedBasketIds, setSelectedBasketIds] = useState([]);
     const [lockedBasketIds, setLockedBasketIds] = useState([]);
     const [basketTenderMap, setBasketTenderMap] = useState({});
 
-    useEffect(() => {
-        // get logged-in user (from localStorage, etc.)
-        const storedUser = JSON.parse(localStorage.getItem("data"));
-        setUser(storedUser);
-
-        // fetch all users info
-        axios
-            .get(API_BASE_URL + "/get/GetUsers")
-            .then((res) => {
-                setUsers(res.data || []);
-            })
-            .catch((err) => {
-                console.error("❌ Error fetching users:", err);
-            });
-    }, []);
-
-    // helper to get username or name by id
-    const getUsernameById = (id) => {
-        const u = usersinfo.find((usr) => usr.id === id || usr.user_id === id);
-        // console.log("Getting username for ID:", id, "=>", u);
-        // console.log("Getting username for ID:", usersinfo, id);
-        if (!u) return "—";
-
-        // Prefer username if available, otherwise fallback to full name
-        return u.username?.trim()
-            ? u.username
-            : `${u.ovog || ""} ${u.ner || ""}`.trim() || "—";
-    };
-    // Open modal
-    const handleCreateTender = async (record) => {
-        setCurrentRecord(record);
-        setTenderNumber("");
-        setSelectedBaskets([]);
-        setLockedBasketIds([]); // reset
-
-
+    const loadData = useCallback(async () => {
+        setLoading(true);
         try {
-            const res = await axios.get(
-                `${API_BASE_URL}/get/GetBasketIdsByRootNum/${record.plan_root_number}`
-            );
-            setBasketTenderMap(res.data?.basketTenderMap || {});
-            setLockedBasketIds(res.data?.basketIds || []);
-        } catch (err) {
-            console.error("❌ Failed to load locked baskets:", err);
-        }
+            const [plansResult, usersResult, branchesResult] = await Promise.allSettled([
+                axios.get(`${API_BASE_URL}/get/GetAll`),
+                axios.get(`${API_BASE_URL}/get/GetUsers`),
+                axios.get(`${API_BASE_URL}/get/branches`),
+            ]);
+            if (plansResult.status === "rejected") throw plansResult.reason;
+            if (usersResult.status === "fulfilled") setUsers(usersResult.value.data || []);
+            if (branchesResult.status === "fulfilled") setBranches(branchesResult.value.data || []);
 
-        setModalVisible(true);
-    };
+            const allPlans = plansResult.value.data || [];
+            const permittedPlans = isManager
+                ? allPlans
+                : allPlans.filter((plan) => String(plan.user_id) === String(user.id));
 
-
-    // Save tender
-    const handleSaveTender = async () => {
-        if (!tenderNumber) {
-            message.warning("Тендерийн дугаар оруулна уу!");
-            return;
-        }
-
-        if (selectedBaskets.length === 0) {
-            message.warning("Багц сонгоно уу!");
-            return;
-        }
-
-        const invalid = selectedBaskets.some(
-            id => lockedBasketIds.includes(id)
-        );
-
-        if (invalid) {
-            message.error("Зарим багц аль хэдийн тендерт орсон байна!");
-            return;
-        }
-        console.log("selectedBaskets:", selectedBaskets);
-        if (!tenderNumber) {
-            message.warning("Тендерийн дугаар оруулна уу!");
-            return;
-        }
-        try {
-            const organization = [
-                ...new Set(
-                    currentRecord.baskets.flatMap(basket =>
-                        basket.items.map(item => item.dname)
-                    )
-                )
-            ].join(", ");
-            await axios.post(`${API_BASE_URL}/post/PostTender`, {
-                plan_root_number: currentRecord.plan_root_number,
-                тендерийн_дугаар: tenderNumber,
-                tender_name: currentRecord.plan_name,
-                Organization: organization,
-                Basket_Ids: selectedBaskets.join(","),
-                CreatedBy: user.id,
-            });
-            console.log("✅ Organization:", organization);
-            message.success("✅ Тендер үүсгэгдлээ");
-            setModalVisible(false);
-            setTenderNumber("");
-            setCurrentRecord(null);
-        } catch (err) {
-            console.error("❌ Failed to create tender:", err);
-            message.error("Тендер үүсгэхэд алдаа гарлаа");
-        }
-    };
-    // Calculate new_pricesum automatically
-    const [isModalVisible, setIsModalVisible] = useState(false);
-    const [selectedRecord, setSelectedRecord] = useState(null);
-
-    const handleOk = async () => {
-        if (!selectedRecord?.change_reason?.trim()) return;
-
-        const payload = {
-            basket_item_id: selectedRecord.basket_item_id,
-            new_price: selectedRecord.new_price,
-            new_qty: selectedRecord.new_qty,
-            new_pricesum: selectedRecord.new_pricesum,
-            change_reason: selectedRecord.change_reason,
-        };
-
-        try {
-            const response = await axios.put(`${API_BASE_URL}/put/basket-item`, payload);
-            const postedReason = response.data.change_reason ?? selectedRecord.change_reason;
-
-            // Update table nested data
-            setData((prev) =>
-                prev.map((plan) => ({
-                    ...plan,
-                    baskets: plan.baskets.map((basket) => ({
-                        ...basket,
-                        items: basket.items.map((item) =>
-                            item.basket_item_id === selectedRecord.basket_item_id
-                                ? { ...item, change_reason: postedReason }
-                                : item
-                        ),
-                    })),
-                }))
-            );
-
-            // Update modal state
-            setSelectedRecord((prev) => ({ ...prev, change_reason: postedReason }));
-
-            message.success("Амжилттай хадгалагдлаа!");
-            setIsModalVisible(false);
-        } catch (error) {
-            console.error(error);
-            message.error("Хадгалах амжилтгүй боллоо!");
-        }
-    };
-    const handleCancel = () => {
-        setReason("");
-        setIsModalVisible(false);
-    };
-    useEffect(() => {
-        axios
-            .get(`${API_BASE_URL}/get/GetAll`)
-            .then((response) => {
-                const allPlans = response.data || [];
-
-                // ✅ Filter by logged-in user
-                const filteredPlans =
-                    user?.erh === "Удирдлага"
-                        ? allPlans
-                        : allPlans.filter((plan) => plan.user_id === user.id);
-
-                const transformed = filteredPlans
-                    .sort((a, b) => a.plan_name.localeCompare(b.plan_name)) // ✅ Sort by plan name
-                    .map((planGroup, index) => {
-                        const baskets = planGroup.baskets.map((basket) => ({
-                            key: `basket-${basket.basket_id}`,
-                            basket_id: basket.basket_id,
-                            basket_number: basket.basket_number,
-                            basket_name: basket.basket_name,
-                            basket_type: basket.basket_type,
-                            plan_name: basket.plan_name,
-                            set_date: formatDate(basket.set_date),
-                            publish_date: formatDate(basket.publish_date),
-                            total_price: basket.items.reduce(
-                                (acc, item) => acc + (item.pricesum || 0),
-                                0
-                            ),
-                            items: basket.items,
-                            new_qty: basket.new_qty || "",
-                            new_price: basket.new_price || "",
-                            new_pricesum: basket.new_pricesum || "",
-                            is_Valid: basket.is_valid,
-                        }));
-
-                        const planTotal = baskets.reduce((acc, b) => acc + b.total_price, 0);
-
-                        return {
-                            key: `plan-${planGroup.plan_root_number}-${index}`,
-                            index: index + 1,
-                            plan_root_number: planGroup.plan_root_number,
-                            plan_name: planGroup.plan_name,
-                            user_id: planGroup.user_id,
-                            baskets,
-                            total_price: planTotal,
-                        };
-                    });
-
-                setData(transformed);
-                // setFilteredData(transformed);
-            })
-            .catch((error) => {
-                console.error("❌ Error fetching basket data:", error);
-            });
-    }, []);
-
-
-    console.log("Data fetched:", data);
-    function formatDate(isoString) {
-        const date = new Date(isoString);
-        return date.toLocaleDateString("mn-MN", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-        });
-    }
-    const filteredData = useMemo(() => {
-        let result = data;
-
-        // ✅ Global search
-        if (searchText) {
-            const lower = searchText.toLowerCase();
-            result = result
-                .map((plan) => {
-                    const filteredBaskets = plan.baskets
+            const transformed = permittedPlans
+                .map((planGroup) => {
+                    const baskets = (planGroup.baskets || [])
+                        .filter((basket) => normalize(basket.basket_type).toUpperCase() !== "TEMP" && !basket.is_temp)
                         .map((basket) => {
-                            const filteredItems = basket.items.filter((item) =>
-                                Object.values(item).some(
-                                    (val) =>
-                                        val &&
-                                        val.toString().toLowerCase().includes(lower)
-                                )
-                            );
-                            const basketMatch = Object.values(basket).some(
-                                (val) =>
-                                    val &&
-                                    val.toString().toLowerCase().includes(lower)
-                            );
-                            if (filteredItems.length > 0 || basketMatch) {
-                                return { ...basket, items: filteredItems };
-                            }
-                            return null;
-                        })
-                        .filter(Boolean);
+                            const items = basket.items || [];
+                            return {
+                                key: `basket-${basket.basket_id}`,
+                                basket_id: basket.basket_id,
+                                basket_number: basket.basket_number,
+                                basket_name: normalize(basket.basket_name) || "Нэргүй багц",
+                                basket_type: normalize(basket.basket_type) || "Ангилалгүй",
+                                plan_name: normalize(basket.plan_name),
+                                set_date: basket.set_date,
+                                publish_date: basket.publish_date,
+                                total_price: items.reduce((sum, item) => sum + itemTotal(item), 0),
+                                item_count: items.length,
+                                items,
+                                is_valid: Boolean(basket.is_valid),
+                            };
+                        });
 
-                    const planMatch = Object.values(plan).some(
-                        (val) =>
-                            val &&
-                            val.toString().toLowerCase().includes(lower)
-                    );
-
-                    if (filteredBaskets.length > 0 || planMatch) {
-                        return { ...plan, baskets: filteredBaskets };
-                    }
-                    return null;
+                    return {
+                        key: `plan-${planGroup.plan_root_number}`,
+                        plan_root_number: planGroup.plan_root_number,
+                        plan_name: normalize(planGroup.plan_name) || "Нэргүй төлөвлөгөө",
+                        user_id: planGroup.user_id,
+                        baskets,
+                        total_price: baskets.reduce((sum, basket) => sum + basket.total_price, 0),
+                        item_count: baskets.reduce((sum, basket) => sum + basket.item_count, 0),
+                    };
                 })
-                .filter(Boolean);
+                .filter((plan) => plan.baskets.length > 0)
+                .sort((first, second) => first.plan_name.localeCompare(second.plan_name));
+
+            setData(transformed);
+        } catch (error) {
+            console.error("Plan data fetch failed:", error);
+            message.error("Төлөвлөгөөний мэдээлэл татахад алдаа гарлаа");
+        } finally {
+            setLoading(false);
         }
+    }, [isManager, user.id]);
 
-        Object.keys(columnFilters).forEach((key) => {
-            const value = columnFilters[key]?.toLowerCase?.() || "";
-            if (!value) return;
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
 
-            result = result.filter((plan) => {
-                // 🧠 Special handling for user_id column
-                if (key === "user_id") {
-                    const username = getUsernameById(plan.user_id)?.toLowerCase?.() || "";
-                    return username.includes(value);
-                }
+    const userMap = useMemo(
+        () => new Map(users.map((entry) => [String(entry.id ?? entry.user_id), entry])),
+        [users]
+    );
+    const getUserName = useCallback((id) => {
+        const entry = userMap.get(String(id));
+        if (!entry) return "—";
+        return [entry.ovog, entry.ner].filter(Boolean).join(" ").trim()
+            || normalize(entry.username)
+            || "—";
+    }, [userMap]);
 
-                // Default behavior for other columns
-                return (plan[key] || "").toString().toLowerCase().includes(value);
-            });
-        });
-
-
-        return result;
-    }, [data, searchText, columnFilters]);
-
-
-    const renderColumnHeaderWithSearch = (title, dataIndex) => (
-        <div
-            style={{ display: "flex", flexDirection: "column" }}
-            onClick={(e) => e.stopPropagation()} // 🛑 prevent sort when clicking input
-        >
-            <span style={{ fontWeight: 600 }}>{title}</span>
-            <Input
-                placeholder="Хайх..."
-                allowClear
-                size="small"
-                value={columnFilters[dataIndex] || ""}
-                onClick={(e) => e.stopPropagation()}   // 🛑 prevent sorting
-                onFocus={(e) => e.stopPropagation()}   // 🛑 extra safety
-                onChange={(e) =>
-                    setColumnFilters((prev) => ({
-                        ...prev,
-                        [dataIndex]: e.target.value,
-                    }))
-                }
-                style={{ marginTop: 4 }}
-            />
-        </div>
+    const yearOptions = useMemo(
+        () => [...new Set(
+            data.flatMap((plan) =>
+                plan.baskets.map((basket) => getDateYear(basket.publish_date) || getDateYear(basket.set_date))
+            ).filter(Boolean)
+        )].sort((first, second) => second.localeCompare(first)),
+        [data]
     );
 
-    // -------------------- Columns --------------------
-    const planColumns = [
-        {
-            title: renderColumnHeaderWithSearch("Төлөвлөгөө нэр", "plan_name"),
-            dataIndex: "plan_name",
-            key: "plan_name",
-            width: 350, // ✅ fixed width
-            ellipsis: true, // ✅ prevent text overflow
-            sorter: (a, b) => a.plan_name.localeCompare(b.plan_name),
-            sortDirections: ["ascend", "descend"],
-        },
-        {
-            title: renderColumnHeaderWithSearch("Нийт мөнгөн дүн, Төг", "total_price"),
-            dataIndex: "total_price",
-            key: "total_price",
-            width: 130, // ✅ fixed width
-            align: "right",
-            sorter: (a, b) => a.total_price - b.total_price,
-            render: (value) => Number(value).toLocaleString(),
-        },
-        {
-            title:
-                userinfo?.erh === "Удирдлага" || userinfo?.Erh === "Удирдлага"
-                    ? renderColumnHeaderWithSearch("Хариуцагч", "user_id")
-                    : "Хариуцагч",
-            key: "action",
-            width: 150, // ✅ fixed width
-            ellipsis: true,
-            render: (_, record) => {
-                const isValid = record.baskets[0]?.is_valid ?? false;
+    const yearFilteredData = useMemo(() => {
+        if (activeYear === "all") return data;
+        return data.flatMap((plan) => {
+            const baskets = plan.baskets.filter((basket) =>
+                (getDateYear(basket.publish_date) || getDateYear(basket.set_date)) === activeYear
+            );
+            return baskets.length ? [{
+                ...plan,
+                baskets,
+                total_price: baskets.reduce((sum, basket) => sum + basket.total_price, 0),
+                item_count: baskets.reduce((sum, basket) => sum + basket.item_count, 0),
+            }] : [];
+        });
+    }, [activeYear, data]);
 
-                if (userinfo?.erh === "Удирдлага" || userinfo?.Erh === "Удирдлага") {
-                    return (
-                        <span
-                            style={{
-                                color: "#555",
-                                fontSize: 13,
-                                display: "inline-block",
-                                maxWidth: "200px",
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                            }}
-                        >
-                            👤 {getUsernameById(record.user_id)}
-                        </span>
-                    );
-                }
+    const filteredData = useMemo(() => {
+        const query = searchText.trim().toLocaleLowerCase();
+        if (!query) return yearFilteredData;
 
-                return (
-                    <Space>
-                        <Button
-                            type="primary"
-                            size="small"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleCreateTender(record);
-                            }}
-                        >
-                            Тендер үүсгэх
-                        </Button>
-                    </Space>
-                );
-            },
-        },
-        {
-            title: "",
-            key: "print",
-            fixed: "right",
-            width: 80, // ✅ smaller width for icon
-            align: "center",
-            render: (_, row) => (
-                <div
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ cursor: "pointer" }}
-                >
-                    <PrintIcon
-                        normData={row}
-                        planId={row.plan_root_number}
-                        UserId={row.user_id}
-                    />
-                </div>
-            ),
-        },
-    ];
+        return yearFilteredData.flatMap((plan) => {
+            const planMatches = [plan.plan_name, plan.plan_root_number, getUserName(plan.user_id)]
+                .some((value) => normalize(value).toLocaleLowerCase().includes(query));
+            if (planMatches) return [plan];
 
+            const baskets = plan.baskets.filter((basket) => {
+                const basketMatches = [
+                    basket.basket_name,
+                    basket.basket_number,
+                    basket.basket_type,
+                    basket.set_date,
+                ].some((value) => normalize(value).toLocaleLowerCase().includes(query));
+                const itemMatches = basket.items.some((item) => [
+                    item.pkgno,
+                    item.cr4name,
+                    item.crmarkname,
+                    item.crbrandname,
+                    item.zno,
+                    item.dname,
+                ].some((value) => normalize(value).toLocaleLowerCase().includes(query)));
+                return basketMatches || itemMatches;
+            });
+            return baskets.length ? [{
+                ...plan,
+                baskets,
+                total_price: baskets.reduce((sum, basket) => sum + basket.total_price, 0),
+                item_count: baskets.reduce((sum, basket) => sum + basket.item_count, 0),
+            }] : [];
+        });
+    }, [getUserName, searchText, yearFilteredData]);
 
+    const summary = useMemo(() => ({
+        planCount: filteredData.length,
+        basketCount: filteredData.reduce((sum, plan) => sum + plan.baskets.length, 0),
+        itemCount: filteredData.reduce((sum, plan) => sum + plan.item_count, 0),
+        totalPrice: filteredData.reduce((sum, plan) => sum + plan.total_price, 0),
+    }), [filteredData]);
+
+    const openTenderModal = async (plan) => {
+        setCurrentPlan(plan);
+        setTenderNumber("");
+        setSelectedBasketIds([]);
+        setLockedBasketIds([]);
+        setBasketTenderMap({});
+        setTenderModalOpen(true);
+        setTenderOptionsLoading(true);
+        try {
+            const response = await axios.get(
+                `${API_BASE_URL}/get/GetBasketIdsByRootNum/${plan.plan_root_number}`
+            );
+            setLockedBasketIds((response.data?.basketIds || []).map(String));
+            setBasketTenderMap(response.data?.basketTenderMap || {});
+        } catch (error) {
+            console.error("Tender basket locks fetch failed:", error);
+            message.error("Тендерт орсон багцуудыг шалгахад алдаа гарлаа");
+        } finally {
+            setTenderOptionsLoading(false);
+        }
+    };
+
+    const selectedTenderBaskets = useMemo(() => {
+        const selected = new Set(selectedBasketIds.map(String));
+        return (currentPlan?.baskets || []).filter((basket) => selected.has(String(basket.basket_id)));
+    }, [currentPlan, selectedBasketIds]);
+    const selectedTenderTotal = selectedTenderBaskets.reduce(
+        (sum, basket) => sum + basket.total_price,
+        0
+    );
+
+    const saveTender = async () => {
+        const normalizedTenderNumber = tenderNumber.trim();
+        if (!normalizedTenderNumber) {
+            message.warning("Тендерийн дугаар оруулна уу");
+            return;
+        }
+        if (!selectedTenderBaskets.length) {
+            message.warning("Багц сонгоно уу");
+            return;
+        }
+        if (selectedBasketIds.some((id) => lockedBasketIds.includes(String(id)))) {
+            message.error("Сонгосон багцын зарим нь тендерт орсон байна");
+            return;
+        }
+
+        const organization = [...new Set(
+            selectedTenderBaskets.flatMap((basket) =>
+                basket.items.map((item) => normalize(item.dname)).filter(Boolean)
+            )
+        )].join(", ");
+
+        setTenderLoading(true);
+        try {
+            await axios.post(`${API_BASE_URL}/post/PostTender`, {
+                plan_root_number: currentPlan.plan_root_number,
+                тендерийн_дугаар: normalizedTenderNumber,
+                tender_name: currentPlan.plan_name,
+                Organization: organization,
+                Basket_Ids: selectedBasketIds.join(","),
+                CreatedBy: user.id,
+            });
+            message.success("Тендер амжилттай үүсгэгдлээ");
+            setTenderModalOpen(false);
+            setCurrentPlan(null);
+            setSelectedBasketIds([]);
+            setTenderNumber("");
+        } catch (error) {
+            console.error("Tender creation failed:", error);
+            message.error(error.response?.data?.message || "Тендер үүсгэхэд алдаа гарлаа");
+        } finally {
+            setTenderLoading(false);
+        }
+    };
 
     const basketColumns = [
         {
             title: "Ангилал",
             dataIndex: "basket_type",
             key: "basket_type",
-            sorter: (a, b) => a.basket_type.localeCompare(b.basket_type),
-            defaultSortOrder: "ascend",
-            width: 220,
-            render: (value) => <span style={{ color: "#1890ff" }}>{value}</span>,
+            width: 150,
+            render: (value) => <Tag bordered={false}>{value}</Tag>,
         },
-        { title: "Багц дугаар", dataIndex: "basket_number", key: "basket_number", width: 100 },
-        { title: "Багцны нэр", dataIndex: "basket_name", key: "basket_name", width: 320 },
-        { title: "Огноо", dataIndex: "set_date", key: "set_date", render: (value) => <span style={{ color: "#888" }}>{value}</span> },
-        { title: "Нийт мөнгөн дүн", dataIndex: "total_price", key: "total_price", render: (value) => Number(value).toLocaleString() },
+        { title: "№", dataIndex: "basket_number", key: "basket_number", width: 70, align: "center" },
+        {
+            title: "Багцын нэр",
+            dataIndex: "basket_name",
+            key: "basket_name",
+            width: 280,
+            ellipsis: true,
+            render: (value, record) => (
+                <Space direction="vertical" size={3}>
+                    <Space size={8}>
+                        <FolderOpenOutlined
+                            style={{
+                                color: expandedBasketKeys.includes(record.key) ? "#4d829f" : "#8c8c8c",
+                                fontSize: 16,
+                            }}
+                        />
+                        <Text strong>Багц № {record.basket_number}: {value}</Text>
+                    </Space>
+                    <Text type="secondary">{record.item_count} захиалга</Text>
+                </Space>
+            ),
+        },
+        { title: "Зарлах огноо", dataIndex: "publish_date", key: "publish_date", width: 125, render: formatDate },
+        { title: "Нээх огноо", dataIndex: "set_date", key: "set_date", width: 125, render: formatDate },
+        {
+            title: "Нийт үнэ",
+            dataIndex: "total_price",
+            key: "total_price",
+            width: 155,
+            align: "right",
+            sorter: (first, second) => first.total_price - second.total_price,
+            render: (value) => <Text strong>{formatNumber(value)} ₮</Text>,
+        },
     ];
 
+    const planColumns = [
+        {
+            title: "Төлөвлөгөө",
+            dataIndex: "plan_name",
+            key: "plan_name",
+            ellipsis: true,
+            sorter: (first, second) => first.plan_name.localeCompare(second.plan_name),
+            render: (value, record) => (
+                <Space direction="vertical" size={3}>
+                    <Space size={9}>
+                        <ProjectOutlined
+                            style={{
+                                color: expandedPlanKeys.includes(record.key) ? "#4d829f" : "#8c8c8c",
+                                fontSize: 17,
+                            }}
+                        />
+                        <Text strong style={{ fontSize: 15 }}>{value}</Text>
+                    </Space>
+                    <Space size={6} wrap>
+                        <Tag bordered={false}>{record.baskets.length} багц</Tag>
+                        <Text type="secondary">{record.item_count} захиалга</Text>
+                    </Space>
+                </Space>
+            ),
+        },
+        {
+            title: "Нийт үнэ",
+            dataIndex: "total_price",
+            key: "total_price",
+            width: 180,
+            align: "right",
+            sorter: (first, second) => first.total_price - second.total_price,
+            render: (value) => <Text strong style={{ color: "#32735f" }}>{formatNumber(value)} ₮</Text>,
+        },
+        ...(isManager ? [{
+            title: "Хариуцагч",
+            dataIndex: "user_id",
+            key: "user_id",
+            width: 180,
+            ellipsis: true,
+            render: (value) => getUserName(value),
+        }] : []),
+        {
+            title: "Үйлдэл",
+            key: "actions",
+            width: isManager ? 90 : 230,
+            align: "center",
+            fixed: "right",
+            render: (_, record) => (
+                <Space onClick={(event) => event.stopPropagation()}>
+                    {!isManager && (
+                        <Button
+                            className="plan-create-tender-button"
+                            type="primary"
+                            size="small"
+                            icon={<FileAddOutlined />}
+                            onClick={() => openTenderModal(record)}
+                        >
+                            Тендер үүсгэх
+                        </Button>
+                    )}
+                    <PrintIcon
+                        normData={record}
+                        planId={record.plan_root_number}
+                        UserId={record.user_id}
+                    />
+                </Space>
+            ),
+        },
+    ];
 
-    // -------------------- Expanded Rows --------------------
-    const basketExpandedRowRender = (basket) => (
-        console.log("Rendering basket:", basket) || (
-            <ТөлөвлөгөөItemDetails data={basket.items || []} />
-        )
+    const renderBasketTable = (plan) => (
+        <div className="plan-detail-panel">
+            <div className="plan-detail-owner">
+                <div className="plan-detail-owner__identity">
+                    <ProjectOutlined />
+                    <Text strong>{plan.plan_name}-ийн багцууд</Text>
+                    <Tag color="blue">{plan.baskets.length} багц</Tag>
+                </div>
+                <Space size={16} wrap>
+                    <Text type="secondary">Хариуцагч: {getUserName(plan.user_id)}</Text>
+                    <Text type="secondary">{plan.item_count} захиалга</Text>
+                </Space>
+            </div>
+            <Table
+                columns={basketColumns}
+                dataSource={plan.baskets}
+                rowKey="key"
+                size="small"
+                pagination={false}
+                scroll={{ x: 950 }}
+                expandable={{
+                    expandedRowKeys: expandedBasketKeys,
+                    showExpandColumn: false,
+                    rowExpandable: (record) => record.items.length > 0,
+                    expandedRowRender: (basket) => (
+                        <div className="basket-detail-panel">
+                            <div className="basket-detail-owner">
+                                <div className="basket-detail-owner__identity">
+                                    <FolderOpenOutlined />
+                                    <Text strong>
+                                        Багц № {basket.basket_number}: {basket.basket_name}-ийн захиалгууд
+                                    </Text>
+                                    <Tag color="cyan">{basket.item_count} захиалга</Tag>
+                                </div>
+                                <Text type="secondary">Төлөвлөгөө: {plan.plan_name}</Text>
+                            </div>
+                            <ТөлөвлөгөөItemDetails
+                                data={basket.items}
+                                branches={branches}
+                                onChanged={loadData}
+                            />
+                        </div>
+                    ),
+                }}
+                onRow={(record) => ({
+                    onClick: (event) => {
+                        if (event.target.closest("button, a, input, .ant-dropdown")) return;
+                        setExpandedBasketKeys((keys) => keys.includes(record.key)
+                            ? keys.filter((key) => key !== record.key)
+                            : [...keys, record.key]);
+                    },
+                    style: { cursor: "pointer" },
+                })}
+                rowClassName={(record) => expandedBasketKeys.includes(record.key)
+                    ? "plan-basket-row plan-basket-row--expanded"
+                    : "plan-basket-row"}
+            />
+        </div>
     );
-
-    const planExpandedRowRender = (plan) => (
-        <Table
-            columns={basketColumns}
-            dataSource={plan?.baskets || []}
-            bordered
-            pagination={false}
-            size="small"
-            expandable={{
-                expandedRowRender: basketExpandedRowRender,
-                rowExpandable: (record) => record.items?.length > 0,
-                expandedRowKeys: expandedBasketKeys,
-                onExpand: (expanded, record) => {
-                    setExpandedBasketKeys((prev) =>
-                        expanded
-                            ? [...prev, record.basket_id]
-                            : prev.filter((k) => k !== record.basket_id)
-                    );
-                },
-            }}
-            onRow={(record) => ({
-                onClick: () => {
-                    setExpandedBasketKeys((prev) =>
-                        prev.includes(record.basket_id)
-                            ? prev.filter((k) => k !== record.basket_id)
-                            : [...prev, record.basket_id]
-                    );
-                },
-                // ✅ Highlight basket row when expanded
-                className: expandedBasketKeys.includes(record.basket_id)
-                    ? "expanded-row"
-                    : "",
-            })}
-            rowKey="basket_id"
-        />
-    );
-
 
     return (
         <>
-            <Table
-                columns={planColumns}
-                dataSource={filteredData}
-                bordered
-                pagination={{ pageSize: 5 }}
-                tableLayout="fixed" // ✅ lock column widths
-                scroll={{ x: "100%" }} // ✅ enable horizontal scroll if needed
+            <div className="plan-office">
+                <header className="plan-titlebar">
+                    <div className="plan-titlebar__identity">
+                        <span className="plan-titlebar__icon"><ProjectOutlined /></span>
+                        <div>
+                            <h1>Худалдан авах төлөвлөгөө</h1>
+                        </div>
+                    </div>
+                    <div className="plan-titlebar__summary">
+                        <span className="plan-summary-chip"><strong>{summary.planCount}</strong> төлөвлөгөө</span>
+                        <span className="plan-summary-chip"><strong>{summary.basketCount}</strong> багц</span>
+                        <span className="plan-summary-chip"><strong>{summary.itemCount}</strong> захиалга</span>
+                        <span className="plan-summary-chip plan-summary-chip--price"><strong>{formatNumber(summary.totalPrice)} ₮</strong></span>
+                    </div>
+                </header>
 
-                expandable={{
-                    expandedRowRender: planExpandedRowRender,
-                    rowExpandable: (record) => record.baskets?.length > 0,
-                    expandedRowKeys,
-                    onExpand: (expanded, record) => {
-                        setExpandedRowKeys((prev) =>
-                            expanded
-                                ? [...prev, record.key]
-                                : prev.filter((k) => k !== record.key)
-                        );
-                    },
-                }}
-                onRow={(record) => ({
-                    onClick: () => {
-                        setExpandedRowKeys((prev) =>
-                            prev.includes(record.key)
-                                ? prev.filter((k) => k !== record.key)
-                                : [...prev, record.key]
-                        );
-                    },
-                    // ✅ Highlight active expanded row
-                    className: expandedRowKeys.includes(record.key) ? "expanded-row" : "",
-                })}
-            />
+                <section className="plan-commandbar">
+                    <div className="plan-commandbar__primary">
+                        <div className="plan-year-filter">
+                            <CalendarOutlined />
+                            <Button
+                                className={`plan-year-button ${activeYear === "all" ? "is-active" : ""}`}
+                                onClick={() => setActiveYear("all")}
+                            >
+                                Бүгд
+                            </Button>
+                            {yearOptions.map((year) => (
+                                <Button
+                                    key={year}
+                                    className={`plan-year-button ${activeYear === year ? "is-active" : ""}`}
+                                    onClick={() => setActiveYear(year)}
+                                >
+                                    {year}
+                                </Button>
+                            ))}
+                        </div>
+                        <Input
+                            allowClear
+                            className="plan-commandbar__search"
+                            prefix={<SearchOutlined />}
+                            placeholder="Төлөвлөгөө, багц, бараа, албаар хайх..."
+                            value={searchText}
+                            onChange={(event) => setSearchText(event.target.value)}
+                        />
+                    </div>
+                    <div className="plan-commandbar__actions">
+                        {expandedPlanKeys.length > 0 && (
+                            <Button
+                                className="plan-command-button"
+                                onClick={() => {
+                                    setExpandedPlanKeys([]);
+                                    setExpandedBasketKeys([]);
+                                }}
+                            >
+                                Бүгдийг хураах
+                            </Button>
+                        )}
+                        <Button
+                            className="plan-command-button"
+                            icon={<ReloadOutlined />}
+                            onClick={loadData}
+                            loading={loading}
+                        >
+                            Шинэчлэх
+                        </Button>
+                    </div>
+                </section>
 
+                <section className="plan-workspace">
+                    <Spin spinning={loading} tip="Төлөвлөгөө уншиж байна...">
+                        <Table
+                            className="plan-main-table"
+                            columns={planColumns}
+                            dataSource={filteredData}
+                            rowKey="key"
+                            sticky
+                            pagination={{
+                                defaultPageSize: 10,
+                                pageSizeOptions: [5, 10, 20, 50],
+                                showSizeChanger: true,
+                                showTotal: (total, range) => `${range[0]}–${range[1]} / ${total}`,
+                                position: ["bottomCenter"],
+                            }}
+                            scroll={{ x: 850 }}
+                            expandable={{
+                                expandedRowKeys: expandedPlanKeys,
+                                showExpandColumn: false,
+                                rowExpandable: (record) => record.baskets.length > 0,
+                                expandedRowRender: renderBasketTable,
+                            }}
+                            onRow={(record) => ({
+                                onClick: (event) => {
+                                    if (event.target.closest("button, a, input, .ant-dropdown")) return;
+                                    setExpandedPlanKeys((keys) => keys.includes(record.key)
+                                        ? keys.filter((key) => key !== record.key)
+                                        : [...keys, record.key]);
+                                },
+                                style: { cursor: "pointer" },
+                            })}
+                            rowClassName={(record) => expandedPlanKeys.includes(record.key)
+                                ? "plan-root-row plan-root-row--expanded"
+                                : "plan-root-row"}
+                            locale={{ emptyText: <Empty description={searchText ? "Хайлтад тохирох төлөвлөгөө олдсонгүй" : "Төлөвлөгөө байхгүй"} /> }}
+                        />
+                    </Spin>
+                    <footer className="plan-statusbar">
+                        <span>{activeYear === "all" ? "Бүх он" : `${activeYear} он`} · Харагдаж буй: <strong>{summary.planCount}</strong> төлөвлөгөө</span>
+                        <span>Нээгдсэн: <strong>{expandedPlanKeys.length}</strong></span>
+                    </footer>
+                </section>
+            </div>
 
             <Modal
+                rootClassName="plan-tender-modal"
                 title="Тендер үүсгэх"
-                open={modalVisible}
-                onOk={handleSaveTender}
-                onCancel={() => setModalVisible(false)}
+                open={tenderModalOpen}
+                onOk={saveTender}
+                onCancel={() => setTenderModalOpen(false)}
+                okText="Тендер үүсгэх"
+                cancelText="Болих"
+                confirmLoading={tenderLoading}
+                okButtonProps={{ disabled: tenderOptionsLoading || !selectedBasketIds.length }}
+                width={720}
+                centered
+                destroyOnHidden
             >
                 <Input
-                    placeholder="Тендерийн дугаар оруулах"
+                    placeholder="Тендерийн дугаар"
                     value={tenderNumber}
-                    onChange={(e) => setTenderNumber(e.target.value)}
-                    style={{ marginBottom: 16 }}
+                    onChange={(event) => setTenderNumber(event.target.value)}
+                    style={{ marginBottom: 14 }}
                 />
 
-                <Checkbox.Group
-                    style={{ display: "flex", flexDirection: "column" }}
-                    value={selectedBaskets}
-                    onChange={(checkedValues) => setSelectedBaskets(checkedValues)}
-                >
-                    {currentRecord?.baskets?.map((b) => (
-                        <Checkbox
-                            key={b.basket_id}
-                            value={b.basket_id}
-                            disabled={lockedBasketIds.includes(b.basket_id)}
-                        >
-                            {b.basket_name} — {b.total_price?.toLocaleString()}₮
+                <Card size="small" style={{ marginBottom: 14 }}>
+                    <Space wrap size={18}>
+                        <Text type="secondary">Сонгосон:</Text>
+                        <Text strong>{selectedTenderBaskets.length} багц</Text>
+                        <Text strong style={{ color: "#32735f" }}>{formatNumber(selectedTenderTotal)} ₮</Text>
+                    </Space>
+                </Card>
 
-                            {lockedBasketIds.includes(b.basket_id) && (
-                                <span style={{ color: "red", marginLeft: 8 }}>
-                                    (Тендерт орсон: {basketTenderMap[b.basket_id]})
-                                </span>
-                            )}
-                        </Checkbox>
-                    ))}
-                </Checkbox.Group>
-            </Modal>
-            <Modal
-                title="Өөрчлөлтийн шалтгаан"
-                open={isModalVisible}
-                onOk={handleOk}
-                onCancel={handleCancel}
-                okText="Хадгалах"
-                cancelText="Болих"
-            >
-                <Input.TextArea
-                    rows={4}
-                    value={selectedRecord?.change_reason ?? ""}
-                    onChange={(e) =>
-                        setSelectedRecord((prev) => ({ ...prev, change_reason: e.target.value }))
-                    }
-                />
+                <Spin spinning={tenderOptionsLoading}>
+                    <Checkbox.Group
+                        value={selectedBasketIds}
+                        onChange={setSelectedBasketIds}
+                        style={{ width: "100%" }}
+                    >
+                        <Space direction="vertical" style={{ width: "100%" }}>
+                            {(currentPlan?.baskets || []).map((basket) => {
+                                const basketId = String(basket.basket_id);
+                                const locked = lockedBasketIds.includes(basketId);
+                                return (
+                                    <Card
+                                        key={basket.key}
+                                        size="small"
+                                        styles={{ body: { padding: "10px 12px" } }}
+                                        style={{ width: "100%", opacity: locked ? 0.65 : 1 }}
+                                    >
+                                        <Checkbox value={basketId} disabled={locked} style={{ width: "100%" }}>
+                                            <Space direction="vertical" size={2}>
+                                                <Space wrap>
+                                                    <Text strong>{basket.basket_name}</Text>
+                                                    <Tag bordered={false}>{basket.item_count} захиалга</Tag>
+                                                    <Text>{formatNumber(basket.total_price)} ₮</Text>
+                                                </Space>
+                                                {locked && (
+                                                    <Text type="danger">
+                                                        <LockOutlined /> Тендерт орсон: {basketTenderMap[basket.basket_id] || basketTenderMap[basketId] || "—"}
+                                                    </Text>
+                                                )}
+                                            </Space>
+                                        </Checkbox>
+                                    </Card>
+                                );
+                            })}
+                        </Space>
+                    </Checkbox.Group>
+                </Spin>
             </Modal>
         </>
     );
-}
+};
 
 export default ТөлөвлөгөөTable;

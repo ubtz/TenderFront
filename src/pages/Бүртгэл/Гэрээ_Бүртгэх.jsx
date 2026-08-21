@@ -3,15 +3,15 @@ import { Button, message, Modal } from "antd";
 import axios from "axios";
 import GereeTable from "./GereeTable";
 import GereeModal from "./GereeModal";
+import { getStoredUser } from "../../api/session";
 
 const Geree = () => {
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   const [gereenuud, setGereenuud] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [apiToken, setApiToken] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const user = JSON.parse(localStorage.getItem("data") || "{}");
+  const user = getStoredUser() || {};
 
   useEffect(() => {
     fetchGeree();
@@ -46,26 +46,10 @@ const Geree = () => {
     }
   };
 
-  const getNewToken = async () => {
-    try {
-      const res = await axios.post("http://192.168.4.107:8008/v1/token/gtoken", {
-        Username: "coss.api.lib.nrp",
-        Password: "coss.api.lib.nrp.",
-      });
-      setApiToken(res.data.tokendata);
-      return res.data.tokendata;
-    } catch {
-      message.error("Token авахад алдаа гарлаа");
-      return null;
-    }
-  };
-
   const fetchClientInfo = async (reg) => {
     try {
-      let token = apiToken || (await getNewToken());
-      const res = await axios.post("http://192.168.4.107:8008/v1/orders/client", {
+      const res = await axios.post(`${API_BASE_URL}/external/orders/client`, {
         Value: reg,
-        Token: token,
       });
       return res.data;
     } catch (err) {
