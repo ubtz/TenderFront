@@ -34,6 +34,7 @@ import {
 import dayjs from "dayjs";
 import BasketItemsDetails from "../Бүртгэл/BasketItemsDetails";
 import ContractCreateModal from "./ContractCreateModal";
+import TenderReannounceModal from "./TenderReannounceModal";
 import { fieldLabels, generalFieldOrder } from "./tender.fields";
 import { calcCompletion, isEmpty } from "./tender.utils";
 
@@ -94,11 +95,13 @@ const TenderModal = ({
   onDelete,
   hasContract,
   onContractCreated,
+  onReannounced,
 }) => {
   const [form] = Form.useForm();
   const [activeTab, setActiveTab] = useState("general");
   const [activeVersion, setActiveVersion] = useState("v2");
   const [contractModalOpen, setContractModalOpen] = useState(false);
+  const [reannounceModalOpen, setReannounceModalOpen] = useState(false);
   const [orderEditorOpen, setOrderEditorOpen] = useState(false);
   const [fieldOrder, setFieldOrder] = useState(() => [...generalFieldOrder]);
   const [draftFieldOrder, setDraftFieldOrder] = useState(() => [...generalFieldOrder]);
@@ -213,6 +216,8 @@ const TenderModal = ({
       return (
         <Form.Item name={field} noStyle>
           <Select
+            style={{ width: "100%", minWidth: 240 }}
+            popupMatchSelectWidth={320}
             onChange={(value) => saveField(field, value)}
             options={["НТШ", "ХА", "Нэг эх үүсвэр", "Гэрээ шууд байгуулах"].map(
               (value) => ({ label: value, value })
@@ -226,6 +231,8 @@ const TenderModal = ({
       return (
         <Form.Item name={field} noStyle>
           <Select
+            style={{ width: "100%", minWidth: 240 }}
+            popupMatchSelectWidth={320}
             onChange={(value) => saveField(field, value)}
             options={["Бараа", "Ажил үйлчилгээ", "Зөвлөх үйлчилгээ"].map(
               (value) => ({ label: value, value })
@@ -312,8 +319,10 @@ const TenderModal = ({
     },
   ];
 
-  const contractDisabledReason = hasContract
-    ? "Энэ тендерт гэрээ аль хэдийн үүссэн"
+  const contractDisabledReason = isSuspended
+    ? "Түдгэлзүүлсэн тендерт гэрээ үүсгэх боломжгүй"
+    : hasContract
+      ? "Энэ тендерт гэрээ аль хэдийн үүссэн"
     : completion < 100
       ? "Тендерийн мэдээллийг 100% бүрдүүлсний дараа гэрээ үүсгэнэ"
       : isManagement
@@ -394,6 +403,27 @@ const TenderModal = ({
                   </Button>
                 </span>
               </Tooltip>
+              {!isManagement && (
+                <Tooltip
+                  title={isSuspended
+                    ? "Түдгэлзүүлсэн тендерийг дахин зарлах боломжгүй"
+                    : hasContract
+                      ? "Гэрээ үүссэн тендерийг дахин зарлах боломжгүй"
+                      : ""}
+                  placement="left"
+                >
+                  <span style={{ width: "100%" }}>
+                    <Button
+                      block
+                      icon={<ReloadOutlined />}
+                      disabled={hasContract || isSuspended}
+                      onClick={() => setReannounceModalOpen(true)}
+                    >
+                      Тендер дахин зарлах
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
               {!isManagement && (
                 isSuspended ? (
                   <Button
@@ -535,6 +565,15 @@ const TenderModal = ({
         onCreated={(tenderId) => {
           setContractModalOpen(false);
           onContractCreated(tenderId);
+        }}
+      />
+      <TenderReannounceModal
+        open={reannounceModalOpen}
+        record={record}
+        onClose={() => setReannounceModalOpen(false)}
+        onArchived={(result) => {
+          setReannounceModalOpen(false);
+          onReannounced?.(record?.tender_id, result);
         }}
       />
     </>

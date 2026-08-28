@@ -16,6 +16,9 @@ import {
     Badge,
     List,
     Button,
+    Input,
+    Select,
+    Empty,
 } from "antd";
 import { useLocation } from "react-router-dom";
 
@@ -30,8 +33,11 @@ import {
 import axios from "axios";
 import { groupBy } from "lodash";
 import { Drawer } from "antd";
+import dayjs from "dayjs";
+import "./Явц1.css";
 
 const { Title, Text } = Typography;
+const { Search } = Input;
 
 // Алхамын өгөгдөл
 const stepData = [
@@ -86,8 +92,10 @@ const getFieldText = (v) => {
 // Date formatter: "2025-10-21T16:14:01.163Z" → "2025-10-21"
 const formatDate = (value) => {
     const raw = getFieldText(value);
-    if (!raw) return "";
-    return String(raw).split("T")[0]; // ISO string → yyyy-MM-dd
+    if (!raw) return "—";
+    const parsed = dayjs(raw);
+    if (parsed.isValid() && parsed.year() === 1900) return "Эхлэх хугацаа болоогүй";
+    return parsed.isValid() ? parsed.format("YYYY-MM-DD") : String(raw).split("T")[0];
 };
 
 // Numeric un-wrapper (sql.NullFloat64, NullInt64, etc)
@@ -103,6 +111,19 @@ const unwrapNumber = (v) => {
 
     const n = Number(v);
     return isNaN(n) ? 0 : n;
+};
+
+const getItemTotal = (item) => {
+    const total = unwrapNumber(item.pricesum);
+    const price = unwrapNumber(item.price || item.Price);
+    return total > 0 ? total : unwrapNumber(item.qty) * price;
+};
+
+const formatCode = (value) => {
+    const raw = String(getFieldText(value) || "").trim();
+    const code = raw.replace(/\D/g, "");
+    if (code.length !== 14) return raw || "—";
+    return `${code.slice(0, 2)}-${code.slice(2, 4)}-${code.slice(4, 6)}-${code.slice(6, 8)}-${code.slice(8, 11)}-${code.slice(11)}`;
 };
 const getUiStepKeyFromRow = (row) => {
     const backendKey =
@@ -157,6 +178,10 @@ const Явц = () => {
     const [loadingItems, setLoadingItems] = useState(false);
     const [selectedBundle, setSelectedBundle] = useState(null);
     const [activeStepKey, setActiveStepKey] = useState(null);
+    const [searchText, setSearchText] = useState("");
+    const [yearFilter, setYearFilter] = useState("all");
+    const [departmentFilter, setDepartmentFilter] = useState("all");
+    const [sortOrder, setSortOrder] = useState("newest");
     // null = бүх багц
     const API_BASE_URL = import.meta.env.VITE_API_URL;
     // fetch
@@ -217,20 +242,31 @@ const Явц = () => {
 
 
             const totalQty = rows.reduce((sum, r) => sum + unwrapNumber(r.qty), 0);
-            const totalPrice = rows.reduce(
-                (sum, r) => sum + unwrapNumber(r.pricesum || r.Price),
-                0
-            );
+            const totalPrice = rows.reduce((sum, row) => sum + getItemTotal(row), 0);
+
+            const departments = [...new Set(rows.map((row) => String(getFieldText(row.dname) || "").trim()).filter(Boolean))];
+            const pkgname = String(getFieldText(rows[0]?.pkgname) || "").trim();
+            const validRequiredDates = rows
+                .map((row) => dayjs(getFieldText(row.deathdate)))
+                .filter((date) => date.isValid() && date.year() !== 1900);
+            const requiredDate = validRequiredDates.sort((a, b) => a.valueOf() - b.valueOf())[0] || null;
+            const isOverdue = stepIndex < stepData.length - 1
+                && requiredDate
+                && requiredDate.endOf("day").isBefore(dayjs());
 
             const preparedItems = rows.map((row, idx2) => ({
-                key: row.BasketItemId || `${pkgno}_${pkgdate}_${idx2}`,
                 ...row,
+                key: row.basket_item_id || row.BasketItemId || `${pkgno}_${pkgdate}_${idx2}`,
             }));
 
             return {
                 key: `${pkgno}_${pkgdate}_${index}`,
                 pkgno,
+                pkgname,
                 pkgdate,
+                departments,
+                requiredDate,
+                isOverdue,
                 items: preparedItems,
                 stepIndex,
                 stepKey: stepData[stepIndex]?.key || "request",
@@ -259,13 +295,41 @@ const Явц = () => {
             ),
         };
     }, [bundles]);
-    const filteredBundles = useMemo(() => {
-        if (!activeStepKey) return bundles;
+    const years = useMemo(() => [...new Set(bundles.map((bundle) => {
+        const parsed = dayjs(bundle.pkgdate);
+        return parsed.isValid() && parsed.year() !== 1900 ? String(parsed.year()) : "";
+    }).filter(Boolean))].sort((a, b) => b.localeCompare(a)), [bundles]);
 
-        return bundles.filter(
-            (b) => b.stepKey === activeStepKey
-        );
-    }, [bundles, activeStepKey]);
+    const departments = useMemo(() => [...new Set(bundles.flatMap((bundle) => bundle.departments))]
+        .sort((a, b) => a.localeCompare(b, "mn")), [bundles]);
+
+    const filteredBundles = useMemo(() => {
+        const query = searchText.toLocaleLowerCase("mn-MN").trim();
+        const result = bundles.filter((bundle) => {
+            const packageYear = dayjs(bundle.pkgdate).isValid() ? String(dayjs(bundle.pkgdate).year()) : "";
+            const searchable = [
+                bundle.pkgno,
+                bundle.pkgname,
+                ...bundle.departments,
+                ...bundle.items.flatMap((item) => [item.cr4name, item.crmarkname, item.code]),
+            ].map((value) => String(getFieldText(value) || "")).join(" ").toLocaleLowerCase("mn-MN");
+
+            return (!activeStepKey || bundle.stepKey === activeStepKey)
+                && (yearFilter === "all" || packageYear === yearFilter)
+                && (departmentFilter === "all" || bundle.departments.includes(departmentFilter))
+                && (!query || query.split(/\s+/).every((token) => searchable.includes(token)));
+        });
+
+        return result.sort((left, right) => {
+            if (sortOrder === "amount-desc") return right.totalPrice - left.totalPrice;
+            if (sortOrder === "amount-asc") return left.totalPrice - right.totalPrice;
+            if (sortOrder === "stage-desc") return right.stepIndex - left.stepIndex;
+            if (sortOrder === "overdue") return Number(right.isOverdue) - Number(left.isOverdue);
+            const leftTime = dayjs(left.pkgdate).isValid() ? dayjs(left.pkgdate).valueOf() : 0;
+            const rightTime = dayjs(right.pkgdate).isValid() ? dayjs(right.pkgdate).valueOf() : 0;
+            return sortOrder === "oldest" ? leftTime - rightTime : rightTime - leftTime;
+        });
+    }, [bundles, activeStepKey, searchText, yearFilter, departmentFilter, sortOrder]);
 
     // item columns (for expanded table)
     const itemColumns = [
@@ -276,12 +340,13 @@ const Явц = () => {
             align: "center",
             render: (_, __, index) => index + 1,
         },
-        // {
-        //     title: "Код",
-        //     dataIndex: "code",
-        //     key: "code",
-        //     render: (v) => getFieldText(v),
-        // },
+        {
+            title: "Код",
+            dataIndex: "code",
+            key: "code",
+            width: 145,
+            render: formatCode,
+        },
         {
             title: "Нэр",
             dataIndex: "cr4name",
@@ -313,11 +378,11 @@ const Явц = () => {
         },
         {
             title: "Үнэ",
-            dataIndex: "Price",
-            key: "Price",
+            dataIndex: "price",
+            key: "price",
             align: "right",
-            render: (v) => {
-                const n = unwrapNumber(v);
+            render: (v, record) => {
+                const n = unwrapNumber(v || record.Price);
                 return n.toLocaleString() + " ₮";
             },
         },
@@ -329,11 +394,7 @@ const Явц = () => {
             align: "right",
             render: (v, record) => {
                 // fallback: qty * Price
-                let n = unwrapNumber(v);
-                if (!n) {
-                    n = unwrapNumber(record.qty) * unwrapNumber(record.Price);
-                }
-                return n.toLocaleString() + " ₮";
+                return getItemTotal(record).toLocaleString() + " ₮";
             },
         },
         {
@@ -356,6 +417,7 @@ const Явц = () => {
         return (
             <List.Item
                 key={b.key}
+                className={b.isOverdue ? "plan-progress-row is-overdue" : "plan-progress-row"}
                 style={{
                     cursor: "pointer",
                     padding: 12,
@@ -371,6 +433,11 @@ const Явц = () => {
                             <Text strong style={{ fontSize: 15 }}>
                                 Багц #{b.pkgno}
                             </Text>
+                            {b.pkgname && (
+                                <Text ellipsis={{ tooltip: b.pkgname }} style={{ maxWidth: 220, fontSize: 12 }}>
+                                    {b.pkgname}
+                                </Text>
+                            )}
                             <Text type="secondary" style={{ fontSize: 12 }}>
                                 {formatDate(b.pkgdate)}
                             </Text>
@@ -383,7 +450,13 @@ const Явц = () => {
                                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                     <div style={{ width: 8, height: 8, borderRadius: 4, background: stepTagColor(b.stepKey) }} />
                                     <Text>{b.stepTitle}</Text>
+                                    {b.isOverdue && <Tag color="red">Хугацаа хэтэрсэн</Tag>}
                                 </div>
+                                {b.requiredDate && (
+                                    <Text type={b.isOverdue ? "danger" : "secondary"} style={{ fontSize: 11 }}>
+                                        Шаардагдах: {formatDate(b.requiredDate)}
+                                    </Text>
+                                )}
                                 <div style={{ marginTop: 8 }}>
                                     <Progress percent={progressPercent} size="small" showInfo={false} />
                                 </div>
@@ -575,7 +648,69 @@ const Явц = () => {
                 </Card>
 
                 {/* БАГЦЫН ХҮСНЭГТ -> VERTICAL LIST (1 item per row) */}
-                <Card size="small" style={{ borderRadius: 12 }} styles={{ body: { padding: 12 } }} title="Багцласан захиалгууд">
+                <Card
+                    size="small"
+                    style={{ borderRadius: 12 }}
+                    styles={{ body: { padding: 12 } }}
+                    title={`Багцласан захиалгууд (${filteredBundles.length})`}
+                >
+                    <Space direction="vertical" size={10} className="plan-progress-filters">
+                        <Space wrap>
+                            <Search
+                                allowClear
+                                value={searchText}
+                                onChange={(event) => setSearchText(event.target.value)}
+                                placeholder="Багц, бараа, код, албаар хайх"
+                                style={{ width: 340, maxWidth: "100%" }}
+                            />
+                            <Select
+                                value={yearFilter}
+                                onChange={setYearFilter}
+                                style={{ width: 120 }}
+                                options={[
+                                    { label: "Бүх он", value: "all" },
+                                    ...years.map((year) => ({ label: `${year} он`, value: year })),
+                                ]}
+                            />
+                            <Select
+                                showSearch
+                                optionFilterProp="label"
+                                value={departmentFilter}
+                                onChange={setDepartmentFilter}
+                                style={{ width: 180 }}
+                                options={[
+                                    { label: "Бүх алба", value: "all" },
+                                    ...departments.map((department) => ({ label: department, value: department })),
+                                ]}
+                            />
+                            <Select
+                                value={sortOrder}
+                                onChange={setSortOrder}
+                                style={{ width: 170 }}
+                                options={[
+                                    { label: "Шинэ эхэнд", value: "newest" },
+                                    { label: "Хуучин эхэнд", value: "oldest" },
+                                    { label: "Дүн ихээс бага", value: "amount-desc" },
+                                    { label: "Дүн багаас их", value: "amount-asc" },
+                                    { label: "Явцын шатаар", value: "stage-desc" },
+                                    { label: "Хугацаа хэтэрсэн", value: "overdue" },
+                                ]}
+                            />
+                            {(searchText || yearFilter !== "all" || departmentFilter !== "all" || sortOrder !== "newest") && (
+                                <Button
+                                    type="link"
+                                    onClick={() => {
+                                        setSearchText("");
+                                        setYearFilter("all");
+                                        setDepartmentFilter("all");
+                                        setSortOrder("newest");
+                                    }}
+                                >
+                                    Цэвэрлэх
+                                </Button>
+                            )}
+                        </Space>
+                    </Space>
                     {loadingItems ? (
                         <div style={{ textAlign: "center", padding: "40px 0" }}>
                             <Spin tip="Ачаалж байна..." />
@@ -583,6 +718,7 @@ const Явц = () => {
                     ) : (
                         <List
                             dataSource={filteredBundles}
+                            locale={{ emptyText: <Empty description="Тохирох багц олдсонгүй" /> }}
                             renderItem={(b, idx) => renderBundleListItem(b, idx)}
                         />
                     )}
@@ -602,7 +738,7 @@ const Явц = () => {
                         ) : null
                     }
                     placement="right"
-                    width={720}
+                    width="min(820px, calc(100vw - 12px))"
                     open={!!selectedBundle}
                     onClose={() => setSelectedBundle(null)}
                     destroyOnHidden
@@ -611,22 +747,22 @@ const Явц = () => {
                         <>
                             {/* SUMMARY */}
                             <Row gutter={[16, 12]} style={{ marginBottom: 16 }}>
-                                <Col span={12}>
+                                <Col xs={24} sm={12}>
                                     <Text type="secondary">Багц огноо</Text>
                                     <div>{formatDate(selectedBundle.pkgdate)}</div>
                                 </Col>
 
-                                <Col span={12}>
+                                <Col xs={24} sm={12}>
                                     <Text type="secondary">Төрлийн тоо</Text>
                                     <div>{selectedBundle.itemCount} нэр</div>
                                 </Col>
 
-                                <Col span={12}>
+                                <Col xs={24} sm={12}>
                                     <Text type="secondary">Нийт тоо хэмжээ</Text>
                                     <div>{selectedBundle.totalQty.toLocaleString()}</div>
                                 </Col>
 
-                                <Col span={12}>
+                                <Col xs={24} sm={12}>
                                     <Text type="secondary">Нийт үнэ</Text>
                                     <div style={{ fontWeight: 600 }}>
                                         {selectedBundle.totalPrice.toLocaleString()} ₮
@@ -644,6 +780,7 @@ const Явц = () => {
                                 dataSource={selectedBundle.items}
                                 pagination={false}
                                 bordered
+                                scroll={{ x: 900 }}
                             />
                         </>
                     )}

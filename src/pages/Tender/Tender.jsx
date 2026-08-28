@@ -260,6 +260,14 @@ const Tender = () => {
         onSuspend={openSuspendModal}
         onActivate={handleActivate}
         onDelete={handleDelete}
+        onReannounced={async (tenderId, result) => {
+          if (result?.archived) {
+            setTenders((current) => current.filter((item) => Number(item.tender_id) !== Number(tenderId)));
+            setSelectedTender(null);
+            setModalVisible(false);
+          }
+          await fetchTenders();
+        }}
         onClose={() => setModalVisible(false)}
         handleUpdate={handleUpdate}
       />

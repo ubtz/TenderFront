@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Dropdown, Empty, Popconfirm, Space, Table, Tag, Typography, message } from "antd";
 import {
-    DeleteOutlined,
     FileTextOutlined,
     MoreOutlined,
+    RollbackOutlined,
     ToolOutlined,
 } from "@ant-design/icons";
-import axios from "axios";
 import PropTypes from "prop-types";
-import { updateOrderStatus } from "../../api/orders";
 
 const PLAN_BASE_URL = "http://192.168.4.119:3114/static/upload/plan";
 const TECH_BASE_URL = "http://192.168.4.119:3114/static/upload/tech";
-const API_BASE_URL = import.meta.env.VITE_API_URL;
 const { Text } = Typography;
 
 const unwrap = (value) => {
@@ -42,7 +39,7 @@ const openDocument = (baseUrl, path) => {
     window.open(`${baseUrl}/${normalize(path).replace(/^\//, "")}`, "_blank", "noopener,noreferrer");
 };
 
-const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }) => {
+const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, onReturnToMyBasket }) => {
     const [tableData, setTableData] = useState(data);
     const [expandedKeys, setExpandedKeys] = useState([]);
     const [deletingKey, setDeletingKey] = useState("");
@@ -64,21 +61,26 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }
     const groupedData = useMemo(() => {
         const groups = new Map();
         tableData.forEach((item, index) => {
-            const pkgno = normalize(item.pkgno) || "Тодорхойгүй";
-            const pkgdate = normalize(item.pkgdate);
-            const key = `${pkgno}-${pkgdate || "no-date"}`;
+            const code = normalize(item.code);
+            const key = code ? `code-${code}` : `item-${normalize(item.BasketItemId || item.basket_item_id || item.id) || index}`;
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push({
                 ...item,
-                rowKey: `${key}-${normalize(item.basket_item_id || item.BasketItemId || item.id || item.rid) || "item"}-${index}`,
+                rowKey: `${key}-${normalize(item.basket_item_id || item.BasketItemId || item.id || item.rid) || index}`,
             });
         });
 
         return [...groups.entries()].map(([key, items]) => ({
             key,
-            pkgno: normalize(items[0]?.pkgno) || "Тодорхойгүй",
-            pkgdate: normalize(items[0]?.pkgdate),
-            dname: normalize(items[0]?.dname),
+            code: normalize(items[0]?.code),
+            cr4name: normalize(items[0]?.cr4name) || "Нэргүй бараа",
+            crmarkname: normalize(items[0]?.crmarkname),
+            crbrandname: normalize(items[0]?.crbrandname),
+            mname: normalize(items[0]?.mname),
+            usize: normalize(items[0]?.usize),
+            price: toNumber(items[0]?.price),
+            packageNames: [...new Set(items.map((item) => normalize(item.pkgname) || normalize(item.pkgno)).filter(Boolean))],
+            departments: [...new Set(items.map((item) => normalize(item.dname)).filter(Boolean))],
             quantity: items.reduce((sum, item) => sum + toNumber(item.qty), 0),
             totalPrice: items.reduce((sum, item) => sum + itemTotal(item), 0),
             planurl: normalize(items[0]?.planurl),
@@ -95,21 +97,22 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }
                 .filter(Boolean);
             if (!ids.length) throw new Error("Багцын мөрийн дугаар олдсонгүй");
 
-            await Promise.all(
-                ids.map((id) => axios.delete(`${API_BASE_URL}/delete/basket-item`, { params: { id } }))
-            );
-            await updateOrderStatus(record.pkgno, record.pkgdate, "1");
-            setTableData((items) => items.filter((item) => {
-                const pkgno = normalize(item.pkgno);
-                const pkgdate = normalize(item.pkgdate);
-                return pkgno !== record.pkgno || pkgdate !== record.pkgdate;
-            }));
+            if (onReturnToMyBasket) {
+                await onReturnToMyBasket(ids);
+            } else {
+                throw new Error("Миний сагс руу буцаах үйлдэл тохируулагдаагүй байна");
+            }
+            const deletedIds = new Set(ids.map(String));
+            const remainingItems = tableData.filter((item) => !deletedIds.has(String(
+                unwrap(item.BasketItemId) || item.basket_item_id || item.id
+            )));
+            setTableData(remainingItems);
             setExpandedKeys((keys) => keys.filter((key) => key !== record.key));
             await onChanged?.();
-            message.success(`Багц №${record.pkgno} амжилттай устгагдлаа`);
+            message.success("Захиалгыг Миний сагс → Багцлаагүй хэсэгт буцаалаа");
         } catch (error) {
-            console.error("Package deletion failed:", error);
-            message.error(error.response?.data?.message || error.message || "Багц устгахад алдаа гарлаа");
+            console.error("Plan item return failed:", error);
+            message.error(error.response?.data?.message || error.message || "Захиалга буцаахад алдаа гарлаа");
         } finally {
             setDeletingKey("");
         }
@@ -140,27 +143,39 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }
 
     const columns = [
         {
-            title: "Захиалгын багц",
-            dataIndex: "pkgno",
-            key: "pkgno",
-            width: 210,
+            title: "Барааны нэр",
+            dataIndex: "cr4name",
+            key: "cr4name",
+            width: 230,
             render: (value, record) => (
                 <Space direction="vertical" size={2}>
                     <Text strong>{value}</Text>
-                    <Tag bordered={false}>{record.items.length} захиалга</Tag>
+                    <Space size={5} wrap>
+                        {record.crmarkname && <Text type="secondary">{record.crmarkname}</Text>}
+                        {record.items.length > 1 && <Tag color="green">{record.items.length} захиалга нэгтгэсэн</Tag>}
+                    </Space>
                 </Space>
             ),
         },
-        { title: "Огноо", dataIndex: "pkgdate", key: "pkgdate", width: 110, render: formatDate },
+        { title: "Код", dataIndex: "code", key: "code", width: 165, render: formatCposCode },
+        {
+            title: "Захиалгын багц",
+            dataIndex: "packageNames",
+            key: "packageNames",
+            width: 220,
+            ellipsis: true,
+            render: (values) => values.join(", ") || "-",
+        },
         {
             title: "Алба",
-            dataIndex: "dname",
-            key: "dname",
-            width: 210,
+            dataIndex: "departments",
+            key: "departments",
+            width: 180,
             ellipsis: true,
-            render: (value) => branchMap.get(value) || value || "-",
+            render: (values) => values.map((value) => branchMap.get(value) || value).join(", ") || "-",
         },
-        { title: "Нийт тоо", dataIndex: "quantity", key: "quantity", width: 120, align: "right", render: formatNumber },
+        { title: "Тоо хэмжээ", dataIndex: "quantity", key: "quantity", width: 110, align: "right", render: formatNumber },
+        { title: "Нэгж үнэ", dataIndex: "price", key: "price", width: 125, align: "right", render: (value) => `${formatNumber(value)} ₮` },
         {
             title: "Нийт үнэ",
             dataIndex: "totalPrice",
@@ -199,16 +214,15 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }
                         )}
                         {user?.erh !== "Удирдлага" && (
                             <Popconfirm
-                                title="Багцыг устгах уу?"
-                                description="Захиалгууд буцаад бүх захиалгад орно."
+                                title="Захиалгыг багцаас хасах уу?"
+                                description="Захиалгууд Миний сагс → Багцлаагүй хэсэгт шилжинэ."
                                 onConfirm={() => handleDelete(record)}
-                                okText="Устгах"
+                                okText="Миний сагс руу буцаах"
                                 cancelText="Болих"
                             >
                                 <Button
-                                    danger
                                     size="small"
-                                    icon={<DeleteOutlined />}
+                                    icon={<RollbackOutlined />}
                                     loading={deletingKey === record.key}
                                 />
                             </Popconfirm>
@@ -226,7 +240,7 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }
             rowKey="key"
             size="small"
             pagination={groupedData.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
-            scroll={{ x: 920 }}
+            scroll={{ x: 1180 }}
             expandable={{
                 expandedRowKeys: expandedKeys,
                 showExpandColumn: false,
@@ -262,6 +276,7 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged }
     data: PropTypes.array,
     branches: PropTypes.array,
     onChanged: PropTypes.func,
+    onReturnToMyBasket: PropTypes.func,
 };
 
 export default ТөлөвлөгөөItemDetails;

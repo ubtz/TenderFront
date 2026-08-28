@@ -1,0 +1,33 @@
+.plan-progress-filters {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 10px;
+    border: 1px solid #edf0f4;
+    border-radius: 9px;
+    background: #fafbfd;
+}
+
+.plan-progress-row {
+    border: 1px solid transparent;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.plan-progress-row:hover {
+    border-color: #bdd7f7;
+    box-shadow: 0 5px 15px rgba(22, 119, 255, 0.08) !important;
+    transform: translateY(-1px);
+}
+
+.plan-progress-row.is-overdue {
+    border-left: 3px solid #ff4d4f;
+}
+
+@media (max-width: 700px) {
+    .plan-progress-filters {
+        overflow-x: auto;
+    }
+
+    .plan-progress-filters > .ant-space-item {
+        min-width: 680px;
+    }
+}

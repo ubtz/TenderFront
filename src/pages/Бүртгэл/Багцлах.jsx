@@ -5,6 +5,7 @@ import {
     DisconnectOutlined,
     InboxOutlined,
     LockOutlined,
+    ProjectOutlined,
     RollbackOutlined,
     ShoppingCartOutlined,
     UnorderedListOutlined,
@@ -13,7 +14,7 @@ import {
 } from "@ant-design/icons";
 import Table from "./Table";
 import axios from "axios";
-import MyModalWithTable from "./Modal_Багцлах";
+import PlanAssignmentModal, { PLAN_INBOX_TYPE } from "./PlanAssignmentModal";
 import { fetchOrders, fetchOrdersToken, returnOrder } from "../../api/orders";
 import {
     createBasketItemPayload,
@@ -259,7 +260,10 @@ const Багцлах = () => {
                     key: `packaged-${item.basketItemId}`,
                     year: getOrderYear(item),
                     month: getOrderMonth(item),
-                    destinationBasketName: basket?.basket_name || "",
+                    destinationBasketName:
+                        String(basket?.basket_type || "").trim().toUpperCase() === PLAN_INBOX_TYPE
+                            ? `Төлөвлөгөө: ${basket?.plan_name || "Нэргүй"}`
+                            : basket?.basket_name || "",
                 };
             })
         );
@@ -619,7 +623,6 @@ const Багцлах = () => {
         try {
             await loadBasketState();
             setActiveSection("mine");
-            setMineOrderStatus("packaged");
         } catch (err) {
             console.error("Basket count refresh failed:", err);
             message.error("Сагсны тоог шинэчлэхэд алдаа гарлаа");
@@ -698,7 +701,7 @@ const Багцлах = () => {
                     <span className="packing-titlebar__icon"><AppstoreAddOutlined /></span>
                     <div>
                         <h1>Сагс ба багцлалт</h1>
-                        <p>Захиалга сонгох, сагсанд авах, багц үүсгэх нэгдсэн ажлын талбар</p>
+                        <p>Захиалга сонгох, сагсанд авах, төлөвлөгөөнд шилжүүлэх нэгдсэн ажлын талбар</p>
                     </div>
                 </div>
                 <div className="packing-titlebar__summary">
@@ -805,9 +808,9 @@ const Багцлах = () => {
                                     disabled={loading || !selectedRows.length}
                                     onClick={() => setVisible(true)}
                                     type="primary"
-                                    icon={<AppstoreAddOutlined />}
+                                    icon={<ProjectOutlined />}
                                 >
-                                    Багцлах ({selectedRows.length})
+                                    Төлөвлөгөөнд оруулах ({selectedRows.length})
                                 </Button>
                             </>
                         ) : (
@@ -947,7 +950,7 @@ const Багцлах = () => {
                 </footer>
             </main>
 
-            <MyModalWithTable
+            <PlanAssignmentModal
                 visible={visible}
                 setVisible={setVisible}
                 selectedRows={selectedRows}

@@ -873,3 +873,292 @@
     min-width: 145px;
   }
 }
+.plan-assignment-modal .ant-modal-content {
+    border-radius: 18px;
+    overflow: hidden;
+}
+
+.plan-assignment-modal {
+    max-width: calc(100vw - 32px);
+}
+
+.plan-assignment-modal .ant-modal-body {
+    min-width: 0;
+    overflow-x: hidden;
+}
+
+.plan-assignment-modal__intro {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    border: 1px solid #d9e8f1;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f4f9fc 0%, #eef7f3 100%);
+    color: #3f738f;
+}
+
+.plan-assignment-modal__intro > .anticon {
+    margin-top: 3px;
+    font-size: 21px;
+}
+
+.plan-assignment-modal__intro > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.plan-assignment-modal__search {
+    border-radius: 10px;
+}
+
+.plan-assignment-modal__toolbar {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 9px;
+    margin-bottom: 10px;
+}
+
+.plan-assignment-year-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 7px;
+    border: 1px solid #e1e9ed;
+    border-radius: 11px;
+    background: #f8fafb;
+}
+
+.plan-assignment-year-filter__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 7px;
+    color: #667b86;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.plan-assignment-year-filter .ant-btn {
+    height: 30px;
+    padding-inline: 13px;
+    border-color: transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #5a6d76;
+    box-shadow: none;
+}
+
+.plan-assignment-year-filter .ant-btn:hover {
+    border-color: #b8d2de;
+    background: #fff;
+    color: #3f7792;
+}
+
+.plan-assignment-year-filter .ant-btn.is-active {
+    border-color: #5f93ad;
+    background: #e8f3f8;
+    color: #315f76;
+    font-weight: 700;
+}
+
+.plan-assignment-list {
+    display: grid;
+    gap: 9px;
+    max-height: 440px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 2px 10px 2px 2px;
+    scrollbar-gutter: stable;
+}
+
+.plan-assignment-card {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    height: auto;
+    min-height: 72px;
+    padding: 11px 14px;
+    text-align: left;
+    border: 1px solid #e2e8ec;
+    border-radius: 13px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(37, 67, 82, 0.04);
+}
+
+.plan-assignment-card:hover,
+.plan-assignment-card.is-selected {
+    border-color: #5c91ad;
+    background: #f3f9fc;
+    box-shadow: 0 5px 16px rgba(66, 119, 145, 0.12);
+}
+
+.plan-assignment-card__icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: #e7f2f7;
+    color: #477f9c;
+    font-size: 18px;
+}
+
+.plan-assignment-card__content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.35;
+}
+
+.plan-assignment-card__content strong {
+    overflow: hidden;
+    color: #263b46;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plan-assignment-card__content small {
+    color: #74858e;
+}
+
+.plan-assignment-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.plan-assignment-card__editor {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 3px;
+}
+
+.plan-assignment-card__meta .ant-btn {
+    flex: 0 0 auto;
+}
+
+.plan-create-form {
+    display: grid;
+    gap: 16px;
+    padding: 8px 2px;
+}
+
+.plan-create-form label {
+    display: grid;
+    gap: 7px;
+}
+
+.plan-create-form label > span {
+    color: #3a4c55;
+    font-weight: 600;
+}
+
+.plan-create-form .ant-select {
+    width: 100%;
+}
+
+.plan-price-conflict {
+    display: grid;
+    gap: 12px;
+    padding-top: 6px;
+}
+
+.plan-price-conflict__product {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 14px;
+    border-radius: 11px;
+    background: #f5f8fa;
+}
+
+.plan-price-conflict__product strong {
+    color: #253b46;
+    font-size: 15px;
+}
+
+.plan-price-conflict__product span {
+    color: #71828b;
+}
+
+.plan-price-conflict__details {
+    display: grid;
+    gap: 7px;
+}
+
+.plan-price-conflict__details .ant-typography {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 10px;
+    margin: 0;
+}
+
+.plan-price-conflict__details strong {
+    color: #667983;
+    font-weight: 500;
+}
+
+.plan-price-conflict__prices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+}
+
+.plan-price-conflict__prices > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 11px 12px;
+    border: 1px solid #d8e5dc;
+    border-radius: 10px;
+    background: #f5faf7;
+}
+
+.plan-price-conflict__prices span {
+    color: #6f7e75;
+    font-size: 12px;
+}
+
+.plan-price-conflict__prices strong {
+    color: #31714f;
+    font-size: 16px;
+}
+
+.plan-price-conflict__prices .is-conflicting {
+    border-color: #f1c2c0;
+    background: #fff5f5;
+}
+
+.plan-price-conflict__prices .is-conflicting strong {
+    color: #c53b36;
+}
+
+@media (max-width: 760px) {
+    .plan-assignment-modal__toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .plan-assignment-card {
+        grid-template-columns: 38px minmax(0, 1fr);
+    }
+
+    .plan-assignment-card__meta {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
+    }
+}

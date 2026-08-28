@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
-import { Typography, Row, Col, Card, Radio, Select, Spin, message } from "antd";
+import { Typography, Row, Col, Card, Empty, Radio, Select, Segmented, Spin, message } from "antd";
 import ReactECharts from "echarts-for-react";
 import CountUp from "react-countup";
 import { useNavigate } from "react-router-dom";
+import {
+  ArrowRightOutlined,
+} from "@ant-design/icons";
 
 import GovLogo from "../assets/Gov_Logo.png";
 import GovLogoTender from "../assets/Gov_Tender_logo.png";
@@ -31,6 +34,7 @@ export default function Home() {
 
   const [scope, setScope] = useState("zam");
   const [selectedAAN, setSelectedAAN] = useState(null);
+  const [activeYear, setActiveYear] = useState(String(new Date().getFullYear()));
 
   const [branchList, setBranchList] = useState([]);
   const [branchStats, setBranchStats] = useState([]);
@@ -56,7 +60,7 @@ export default function Home() {
         const [branchesRes, branchStatsRes, statisticRes] = await Promise.all([
           axios.get(`${API_BASE_URL}/get/branches`),
           axios.get(`${API_BASE_URL}/get/GetBranchStatistics`),
-          axios.get(`${API_BASE_URL}/get/Statistic`),
+          axios.get(`${API_BASE_URL}/get/Statistic`, { params: { year: activeYear } }),
         ]);
 
         setBranchList(Array.isArray(branchesRes.data) ? branchesRes.data : []);
@@ -85,7 +89,7 @@ export default function Home() {
     };
 
     fetchAll();
-  }, [API_BASE_URL]);
+  }, [API_BASE_URL, activeYear]);
 
   useEffect(() => {
     setSelectedAAN(null);
@@ -94,6 +98,16 @@ export default function Home() {
   const uniqueServices = useMemo(() => {
     return [...new Set(branchList.map((b) => b.service).filter(Boolean))];
   }, [branchList]);
+
+  const availableYears = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return [...new Set([
+      currentYear - 1,
+      currentYear,
+      currentYear + 1,
+      ...branchStats.map((item) => Number(item.year)).filter(Boolean),
+    ])].sort((first, second) => first - second);
+  }, [branchStats]);
 
   const selectedServiceBranchIds = useMemo(() => {
     if (scope !== "alban" || !selectedAAN) return new Set();
@@ -106,20 +120,21 @@ export default function Home() {
   }, [branchList, scope, selectedAAN]);
 
   const filteredBranchStats = useMemo(() => {
-    if (scope === "zam") return branchStats;
+    const yearStats = branchStats.filter((item) => String(item.year) === activeYear);
+    if (scope === "zam") return yearStats;
 
     if (scope === "alban") {
       if (!selectedServiceBranchIds.size) return [];
-      return branchStats.filter((item) =>
+      return yearStats.filter((item) =>
         selectedServiceBranchIds.has(String(item.branchId))
       );
     }
 
     if (!selectedAAN) return [];
-    return branchStats.filter(
+    return yearStats.filter(
       (item) => String(item.branchId) === String(selectedAAN)
     );
-  }, [branchStats, scope, selectedAAN, selectedServiceBranchIds]);
+  }, [activeYear, branchStats, scope, selectedAAN, selectedServiceBranchIds]);
 
   const filteredStatisticData = useMemo(() => {
     if (scope === "zam") return statisticData;
@@ -150,12 +165,8 @@ export default function Home() {
         acc.SuccessfulBudget += Number(item.SuccessfulBudget) || 0;
         acc.SuspendedTenders += Number(item.SuspendedTenders) || 0;
 
-        if (!acc.TotalContracts) {
-          acc.TotalContracts = Number(item.TotalContracts) || 0;
-        }
-        if (!acc.TotalContractValue) {
-          acc.TotalContractValue = Number(item.TotalContractValue) || 0;
-        }
+        acc.TotalContracts += Number(item.TotalContracts) || 0;
+        acc.TotalContractValue += Number(item.TotalContractValue) || 0;
 
         return acc;
       },
@@ -204,9 +215,7 @@ export default function Home() {
         acc.orders += Number(item.TotalOrders) || 0;
         acc.tenders += Number(item.TotalTenders) || 0;
 
-        if (!acc.contracts) {
-          acc.contracts = Number(item.TotalContracts) || 0;
-        }
+        acc.contracts += Number(item.TotalContracts) || 0;
 
         return acc;
       },
@@ -247,7 +256,7 @@ export default function Home() {
           left: "center",
           top: "middle",
           style: {
-            text: `${total.toLocaleString()}\nНийт`,
+            text: `${total.toLocaleString()}\nНийт бүртгэл`,
             textAlign: "center",
             fill: "#0f172a",
             fontSize: 16,
@@ -297,12 +306,22 @@ export default function Home() {
 
   return (
     <div
+      className="home-container home-energetic"
       style={{
         padding: "24px 16px",
         background: "linear-gradient(180deg, #f9fafb 0%, #eef2f7 100%)",
         minHeight: "100vh",
       }}
     >
+      <div className="home-year-toolbar">
+        <div className="home-year-selector">
+          <Segmented
+            value={activeYear}
+            onChange={setActiveYear}
+            options={availableYears.map((year) => ({ label: `${year} он`, value: String(year) }))}
+          />
+        </div>
+      </div>
       {/* <Card
         style={{
           marginBottom: 24,
@@ -335,13 +354,15 @@ export default function Home() {
         </Title>
       </Card> */}
 
-      <Row gutter={32}>
+      <Row gutter={32} className="home-main-grid">
         <Col xs={24} md={16}>
           <Card
+            className="home-chart-card"
             title={
-              <Text style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
-                ТЕНДЕРИЙН ТОО МЭДЭЭ
-              </Text>
+              <div className="home-chart-title">
+                <Text strong>Тоон мэдээлэл</Text>
+                <Text type="secondary">{activeYear} оны сонгосон хамрах хүрээний харьцуулалт</Text>
+              </div>
             }
             style={{
               borderRadius: 20,
@@ -351,7 +372,9 @@ export default function Home() {
             }}
           >
             <div style={{ textAlign: "center", marginBottom: 24 }}>
+              <div className="home-control-label">Хамрах хүрээ сонгох</div>
               <Radio.Group
+                className="home-scope-switch"
                 value={scope}
                 onChange={(e) => setScope(e.target.value)}
                 buttonStyle="solid"
@@ -397,6 +420,7 @@ export default function Home() {
             )}
 
             <div
+              className="home-chart-surface"
               style={{
                 background: "radial-gradient(circle at center, #f9fafb 0%, #f1f5f9 100%)",
                 borderRadius: 20,
@@ -406,7 +430,13 @@ export default function Home() {
                 transition: "all 0.3s ease",
               }}
             >
-              <ReactECharts option={chartOption} style={{ height: 380 }} />
+              {pieData.length ? (
+                <ReactECharts option={chartOption} style={{ height: 380 }} />
+              ) : (
+                <div className="home-chart-empty">
+                  <Empty description={scope === "zam" || selectedAAN ? `${activeYear} онд мэдээлэл алга` : "Алба эсвэл ААН сонгоно уу"} />
+                </div>
+              )}
 
               <div
                 style={{
@@ -419,6 +449,7 @@ export default function Home() {
               >
                 {pieData.map((item) => (
                   <div
+                    className="home-chart-chip"
                     key={item.name}
                     style={{
                       display: "flex",
@@ -447,20 +478,21 @@ export default function Home() {
               </div>
 
               {(scope === "zam" || selectedAAN) && (
-                <div style={{ marginTop: 20, color: "#64748b", fontSize: 14 }}>
-                  Захиалга: <strong>{branchSummary.orders.toLocaleString()}</strong> | Тоо хэмжээ:{" "}
-                  <strong>{branchSummary.qty.toLocaleString()}</strong> | Мөнгөн дүн:{" "}
-                  <strong>{branchSummary.amount.toLocaleString()}</strong>
+                <div className="home-branch-summary">
+                  <div><span>Захиалгын тоо</span><strong>{branchSummary.orders.toLocaleString()}</strong></div>
+                  <div><span>Нийт тоо хэмжээ</span><strong>{branchSummary.qty.toLocaleString()}</strong></div>
+                  <div><span>Нийт мөнгөн дүн</span><strong>{branchSummary.amount.toLocaleString()} ₮</strong></div>
                 </div>
               )}
             </div>
           </Card>
         </Col>
 
-        <Col xs={24} md={8}>
+        <Col xs={24} md={8} className="home-stat-column">
           {displayStats ? (
             <>
               <Card
+                className="home-stat-card home-stat-card--green"
                 style={{
                   background: "linear-gradient(135deg, #10b98115, #10b98125)",
                   backdropFilter: "blur(8px)",
@@ -488,19 +520,18 @@ export default function Home() {
                   e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.08)";
                 }}
               >
-                <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>
-                  НИЙТ ТЕНДЕРИЙН ЗАХИАЛГА
-                </Title>
-                <Text style={{ fontSize: 15, color: "#64748b" }}>
-                  Тоо: {displayStats.TotalOrders.toLocaleString()}
-                </Text>
-                <br />
-                <Text strong style={{ fontSize: 24, color: "#10b981" }}>
-                  <CountUp end={displayStats.TotalOrderValue} duration={2} separator="," />
-                </Text>
+                <div className="home-stat-card__header">
+                  <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>Нийт тендерийн захиалга</Title>
+                </div>
+                <div className="home-stat-metrics">
+                  <div><span>Захиалгын тоо</span><strong>{displayStats.TotalOrders.toLocaleString()}</strong></div>
+                  <div><span>Нийт мөнгөн дүн</span><Text strong style={{ color: "#10b981" }}><CountUp end={displayStats.TotalOrderValue} duration={2} separator="," /> ₮</Text></div>
+                </div>
+                <div className="home-stat-action">Дэлгэрэнгүй харах <ArrowRightOutlined /></div>
               </Card>
 
               <Card
+                className="home-stat-card home-stat-card--rose"
                 style={{
                   background: "linear-gradient(135deg, #f43f5e15, #f43f5e25)",
                   backdropFilter: "blur(8px)",
@@ -528,19 +559,18 @@ export default function Home() {
                   e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.08)";
                 }}
               >
-                <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>
-                  НИЙТ ЗАРЛАГДСАН ТЕНДЕР
-                </Title>
-                <Text style={{ fontSize: 15, color: "#64748b" }}>
-                  Тоо: {displayStats.TotalTenders.toLocaleString()}
-                </Text>
-                <br />
-                <Text strong style={{ fontSize: 24, color: "#f43f5e" }}>
-                  <CountUp end={displayStats.TotalBudget} duration={2} separator="," />
-                </Text>
+                <div className="home-stat-card__header">
+                  <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>Нийт зарлагдсан тендер</Title>
+                </div>
+                <div className="home-stat-metrics">
+                  <div><span>Тендерийн тоо</span><strong>{displayStats.TotalTenders.toLocaleString()}</strong></div>
+                  <div><span>Батлагдсан төсөв</span><Text strong style={{ color: "#f43f5e" }}><CountUp end={displayStats.TotalBudget} duration={2} separator="," /> ₮</Text></div>
+                </div>
+                <div className="home-stat-action">Дэлгэрэнгүй харах <ArrowRightOutlined /></div>
               </Card>
 
               <Card
+                className="home-stat-card home-stat-card--blue"
                 style={{
                   background: "linear-gradient(135deg, #3b82f615, #3b82f625)",
                   backdropFilter: "blur(8px)",
@@ -568,16 +598,14 @@ export default function Home() {
                   e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.08)";
                 }}
               >
-                <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>
-                  БАЙГУУЛСАН ГЭРЭЭНИЙ ДҮН
-                </Title>
-                <Text style={{ fontSize: 15, color: "#64748b" }}>
-                  Тоо: {displayStats.TotalContracts.toLocaleString()}
-                </Text>
-                <br />
-                <Text strong style={{ fontSize: 24, color: "#3b82f6" }}>
-                  <CountUp end={displayStats.TotalContractValue} duration={2} separator="," />
-                </Text>
+                <div className="home-stat-card__header">
+                  <Title level={4} style={{ color: "#0f172a", marginBottom: 10 }}>Байгуулсан гэрээ</Title>
+                </div>
+                <div className="home-stat-metrics">
+                  <div><span>Гэрээний тоо</span><strong>{displayStats.TotalContracts.toLocaleString()}</strong></div>
+                  <div><span>Гэрээний нийт дүн</span><Text strong style={{ color: "#3b82f6" }}><CountUp end={displayStats.TotalContractValue} duration={2} separator="," /> ₮</Text></div>
+                </div>
+                <div className="home-stat-action">Дэлгэрэнгүй харах <ArrowRightOutlined /></div>
               </Card>
             </>
           ) : (
@@ -587,6 +615,7 @@ export default function Home() {
       </Row>
 
       <div
+        className="home-links-section"
         style={{
           marginTop: 50,
           padding: "30px 0",
@@ -599,6 +628,7 @@ export default function Home() {
             <Col key={logo.url} xs={12} sm={8} md={6} lg={3}>
               <a href={logo.url} target="_blank" rel="noopener noreferrer">
                 <Card
+                  className="home-link-card"
                   hoverable
                   styles={{ body: { padding: 0 } }}
                   style={{
@@ -617,6 +647,7 @@ export default function Home() {
                     }}
                   >
                     <img
+                      className="home-link-logo"
                       src={logo.src}
                       alt={logo.text}
                       style={{

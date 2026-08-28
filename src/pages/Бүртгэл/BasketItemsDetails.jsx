@@ -11,11 +11,35 @@ import { getStoredUser } from "../../api/session";
 import "./BasketItemsDetails.css";
 
 const { Text } = Typography;
+const toNumber = (value) => Number(String(value ?? "").replace(/,/g, "")) || 0;
 
 const formatCposCode = (value) => {
     const code = String(value || "").trim().replace(/-/g, "");
     if (!/^\d{14}$/.test(code)) return String(value || "").trim() || "-";
     return code.replace(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{3})(\d{3})$/, "$1-$2-$3-$4-$5-$6");
+};
+
+const bundleItemsByCode = (items) => {
+    const groups = new Map();
+    items.forEach((item, index) => {
+        const code = String(item.code || "").trim();
+        const key = code ? `code-${code}` : `item-${item.basket_item_id || index}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+    });
+
+    return [...groups.entries()].map(([key, sourceItems]) => ({
+        ...sourceItems[0],
+        key,
+        qty: sourceItems.reduce((sum, item) => sum + toNumber(item.qty), 0),
+        price: toNumber(sourceItems[0]?.price),
+        departments: [...new Set(sourceItems.map((item) => String(item.dname || "").trim()).filter(Boolean))],
+        packageNames: [...new Set(sourceItems
+            .map((item) => String(item.pkgname || item.pkgno || "").trim())
+            .filter(Boolean))],
+        source_count: sourceItems.length,
+        source_items: sourceItems,
+    }));
 };
 
 const BasketItemsDetails = ({ basketIds, mode }) => {
@@ -102,6 +126,9 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
     // ✅ Prepare table data (add total qty + total price)
     const tableData = Object.keys(groupedByBasket).map((basketId) => {
         const group = groupedByBasket[basketId];
+        const bundledItems = mode === "geree"
+            ? group.map((item) => ({ ...item, key: item.basket_item_id }))
+            : bundleItemsByCode(group);
         const totalQty = group.reduce((sum, it) => sum + Number(it.qty || 0), 0);
         const totalPrice = group.reduce(
             (sum, it) => sum + Number(it.qty || 0) * Number(it.price || 0),
@@ -111,10 +138,12 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             key: basketId,
             basket_id: basketId,
             basket_name: group[0]?.basket_name || "-",
-            count: group.length,
+            count: bundledItems.length,
+            source_count: group.length,
             total_qty: totalQty,
             total_price: totalPrice,
             items: group,
+            bundled_items: bundledItems,
         };
     });
     const workspaceSummary = tableData.reduce(
@@ -212,8 +241,19 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             width: 145,
             render: formatCposCode,
         },
-        { title: "Нэр", dataIndex: "cr4name", key: "cr4name" },
+        {
+            title: "Нэр",
+            dataIndex: "cr4name",
+            key: "cr4name",
+            render: (value, record) => (
+                <span className="basket-items-product-name">
+                    <span>{value || "-"}</span>
+                    {record.source_count > 1 && <Tag color="green">{record.source_count} нэгтгэсэн</Tag>}
+                </span>
+            ),
+        },
         { title: "Марк", dataIndex: "crmarkname", key: "crmarkname" },
+        { title: "Брэнд", dataIndex: "crbrandname", key: "crbrandname", width: 120 },
         {
             title: "Тоо хэмжээ",
             dataIndex: "qty",
@@ -410,13 +450,24 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             <Table
                 className="basket-items-detail-table"
                 columns={itemColumns}
-                dataSource={record.items.map((item) => ({
-                    key: item.basket_item_id,
-                    ...item,
-                }))}
+                dataSource={record.bundled_items}
+                expandable={mode === "geree" ? undefined : {
+                    rowExpandable: (item) => item.source_count > 1,
+                    expandedRowRender: (item) => (
+                        <div className="basket-items-source-list">
+                            {item.source_items.map((source) => (
+                                <div key={source.basket_item_id}>
+                                    <span>{getServiceByShortName(source.dname) || "-"}</span>
+                                    <span>{source.pkgname || source.pkgno || "-"}</span>
+                                    <strong>{toNumber(source.qty).toLocaleString()} × {toNumber(source.price).toLocaleString()} ₮</strong>
+                                </div>
+                            ))}
+                        </div>
+                    ),
+                }}
                 pagination={false}
                 size="small"
-                scroll={{ x: 1080 }}
+                scroll={{ x: 1200 }}
             />
         </div>
     );

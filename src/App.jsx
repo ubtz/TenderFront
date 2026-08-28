@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
-import { Layout, Avatar, message, Dropdown, Typography } from "antd";
+import { Layout, Avatar, message, Dropdown, Typography, Space } from "antd";
 import {
   UserOutlined,
   LogoutOutlined,
@@ -8,6 +8,7 @@ import {
 } from "@ant-design/icons";
 
 import Nav from "./components/Nav";
+import NotificationCenter from "./components/NotificationCenter";
 import DirtyContext from "./context/DirtyContext";
 import {
   getSessionRole,
@@ -105,17 +106,20 @@ function App() {
               Худалдан авах ажиллагааны цахим систем
             </Title>
 
-            <Dropdown
-              menu={{ items: profileMenuItems, onClick: handleMenuClick }}
-              placement="bottomRight"
-            >
-              <span>
-                <Avatar
-                  icon={<UserOutlined />}
-                  style={{ cursor: "pointer", backgroundColor: "#1677ff" }}
-                />
-              </span>
-            </Dropdown>
+            <Space size={14} align="center">
+              <NotificationCenter />
+              <Dropdown
+                menu={{ items: profileMenuItems, onClick: handleMenuClick }}
+                placement="bottomRight"
+              >
+                <span>
+                  <Avatar
+                    icon={<UserOutlined />}
+                    style={{ cursor: "pointer", backgroundColor: "#1677ff" }}
+                  />
+                </span>
+              </Dropdown>
+            </Space>
           </Header>
 
           {/* ✅ Main content */}
