@@ -239,6 +239,7 @@
 
 .tender-workspace-main {
   min-width: 0;
+  min-height: 0;
   padding: 18px;
   overflow: auto;
   background: #f3f6f8;
@@ -389,6 +390,7 @@
 .tender-version-item {
   display: flex;
   position: relative;
+  width: 100%;
   gap: 9px;
   min-height: 40px;
   margin-bottom: 7px;
@@ -399,7 +401,22 @@
   background: #fff;
   color: #5b7180;
   cursor: pointer;
+  font: inherit;
+  text-align: left;
   transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.tender-version-item .ant-tag {
+  margin-inline: auto 12px;
+}
+
+.tender-version-loading {
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  color: #758995;
 }
 
 .tender-version-item:hover {
@@ -531,24 +548,23 @@
   margin-bottom: 10px;
 }
 
-.tender-reannounce-payload {
+.tender-reannounce-confirmation {
   display: grid;
   gap: 10px;
 }
 
-.tender-reannounce-payload pre {
-  max-height: 470px;
-  margin: 0;
-  padding: 15px;
-  overflow: auto;
+.tender-reannounce-comment {
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px 18px;
   border: 1px solid #d8e3e8;
   border-radius: 10px;
-  background: #17242b;
-  color: #d9e8df;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.55;
-  tab-size: 2;
+  background: #f8fbfc;
+}
+
+.tender-reannounce-comment .ant-input {
+  border-radius: 8px;
+  resize: none;
 }
 
 .tender-reannounce-modal .ant-table-wrapper {
@@ -609,6 +625,33 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 16px;
+}
+
+.tender-contract-return-alert {
+  padding: 12px 18px 0;
+  background: #f5f8fa;
+}
+
+.tender-contract-return-alert .ant-alert {
+  border-color: #efd3a9;
+  border-radius: 10px;
+  background: #fffaf1;
+}
+
+.tender-contract-return-alert .ant-alert-description > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tender-contract-return-alert .ant-alert-description strong {
+  color: #754a2d;
+  font-weight: 600;
+}
+
+.tender-contract-return-alert .ant-alert-description span {
+  color: #8b705d;
+  font-size: 12px;
 }
 
 .tender-contract-source {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Button, Space, message, Spin, Tabs, Modal, Input, Checkbox } from "antd";
+import { Button, message, Spin, Tabs, Modal } from "antd";
 import {
     AppstoreAddOutlined,
     DisconnectOutlined,
@@ -15,10 +15,12 @@ import {
 import Table from "./Table";
 import axios from "axios";
 import PlanAssignmentModal, { PLAN_INBOX_TYPE } from "./PlanAssignmentModal";
+import ReturnOrderForm from "./ReturnOrderForm";
 import { fetchOrders, fetchOrdersToken, returnOrder } from "../../api/orders";
 import {
     createBasketItemPayload,
     getOrderIdentity,
+    getOrderOwnershipIdentity,
     getOrderMonth,
     getOrderRowKey,
     getOrderYear,
@@ -28,25 +30,11 @@ import "./Багцлах.css";
 
 const currentDate = new Date();
 const currentYear = String(currentDate.getFullYear());
-const years = Array.from({ length: 3 }, (_, index) =>
-    String(currentDate.getFullYear() - 2 + index)
-);
+const years = ["2025", "2026", "2027"];
 const months = Array.from({ length: 12 }, (_, index) => index + 1);
 const isInvalidTokenResponse = (response) =>
     String(response?.data?.message || "").toLowerCase().includes("token incorrect");
 const flattenRows = (rows) => rows.flatMap((row) => row.items?.length ? row.items : [row]);
-const { TextArea } = Input;
-const returnCommentReasons = [
-    "Өөр өөр багцад хамаарах бараа материалыг нэг багцад оруулсан",
-    "Багцад бараа материалыг бүрэн оруулаагүй",
-    "Тоо хэмжээ зөрүүтэй",
-    "Нэгж үнэ зөрүүтэй",
-    "Техникийн тодорхойлолт алдаатай",
-    "Төсөв алдаатай",
-    "Тендер амжилтгүй болсон",
-    "НХ руу илгээх ёсгүй багц үүсгэж илгээсэн",
-    "Шаардагдах огноо тендер зохион байгуулах хугацаатай нийцэхгүй байна",
-];
 const getPackageIdentity = (item) =>
     `${String(item.pkgno?.String ?? item.pkgno ?? "").trim()}-${String(item.pkgdate?.String ?? item.pkgdate ?? "").trim()}`;
 
@@ -67,6 +55,7 @@ const Багцлах = () => {
     const [allData, setAllData] = useState([]);
     const [yourOrders, setYourOrders] = useState([]);
     const [packagedOrders, setPackagedOrders] = useState([]);
+    const [returnedOrders, setReturnedOrders] = useState([]);
     const [activeSection, setActiveSection] = useState("all");
     const [mineOrderStatus, setMineOrderStatus] = useState("unpackaged");
     const [activeYear, setActiveYear] = useState(currentYear);
@@ -106,7 +95,7 @@ const Багцлах = () => {
                 setLoading(true);
                 try {
                     const { userItems, allItems } = await loadBasketStateRef.current();
-                    const ownKeys = new Set(userItems.map(getOrderIdentity));
+                    const ownKeys = new Set(userItems.map(getOrderOwnershipIdentity));
                     const stagedKeys = new Set(stagedOrders.current.map(getOrderIdentity));
                     const claimedOwners = new Map();
                     allItems.forEach((item) => {
@@ -114,14 +103,14 @@ const Багцлах = () => {
                         const ownerName = [item.ownerOvog, item.ownerNer]
                             .filter(Boolean)
                             .join(" ") || item.ownerUsername || "Нэргүй хэрэглэгч";
-                        claimedOwners.set(getOrderIdentity(item), ownerName);
+                        claimedOwners.set(getOrderOwnershipIdentity(item), ownerName);
                     });
                     setAllData(cachedOrders
-                        .filter((item) => !ownKeys.has(getOrderIdentity(item)) && !stagedKeys.has(getOrderIdentity(item)))
+                        .filter((item) => !ownKeys.has(getOrderOwnershipIdentity(item)) && !stagedKeys.has(getOrderIdentity(item)))
                         .map((item) => ({
                             ...item,
-                            isLocked: claimedOwners.has(getOrderIdentity(item)),
-                            claimedBy: claimedOwners.get(getOrderIdentity(item)) || "",
+                            isLocked: claimedOwners.has(getOrderOwnershipIdentity(item)),
+                            claimedBy: claimedOwners.get(getOrderOwnershipIdentity(item)) || "",
                         })));
                 } finally {
                     setLoading(false);
@@ -140,21 +129,7 @@ const Багцлах = () => {
                     if (!validToken) throw new Error("Token not received");
                 }
 
-                // 2️⃣ get basket (local API)
-                const { userItems: filteredItems, allItems } = await loadBasketStateRef.current();
-                const basketKeys = new Set(
-                    filteredItems.map(getOrderIdentity)
-                );
-                const claimedOwners = new Map();
-                allItems.forEach((item) => {
-                    if (String(item.userId) === String(user?.id)) return;
-                    const ownerName = [item.ownerOvog, item.ownerNer]
-                        .filter(Boolean)
-                        .join(" ") || item.ownerUsername || "Нэргүй хэрэглэгч";
-                    claimedOwners.set(getOrderIdentity(item), ownerName);
-                });
-
-                // 3️⃣ call orders API
+                // 2️⃣ call orders API
                 let ordersRes = await fetchOrders(yy, "0", validToken);
 
                 // 🔁 token invalid → retry once
@@ -172,12 +147,24 @@ const Багцлах = () => {
                     throw new Error(ordersRes.data?.message || "Orders API error");
                 }
 
+                // 3️⃣ reload local basket state
+                const { userItems: filteredItems, allItems } = await loadBasketStateRef.current();
+                const basketKeys = new Set(filteredItems.map(getOrderOwnershipIdentity));
+                const claimedOwners = new Map();
+                allItems.forEach((item) => {
+                    if (String(item.userId) === String(user?.id)) return;
+                    const ownerName = [item.ownerOvog, item.ownerNer]
+                        .filter(Boolean)
+                        .join(" ") || item.ownerUsername || "Нэргүй хэрэглэгч";
+                    claimedOwners.set(getOrderOwnershipIdentity(item), ownerName);
+                });
+
                 // 4️⃣ filter out basket items
                 let orders = (ordersRes.data.records || []).map(normalizeExternalOrder);
                 const stagedKeys = new Set(stagedOrders.current.map(getOrderIdentity));
                 orders = orders.filter((order) => {
                     const identity = getOrderIdentity(order);
-                    return !basketKeys.has(identity) && !stagedKeys.has(identity);
+                    return !basketKeys.has(getOrderOwnershipIdentity(order)) && !stagedKeys.has(identity);
                 });
 
                 // 5️⃣ normalize records
@@ -186,8 +173,8 @@ const Багцлах = () => {
                     key: getOrderRowKey(rec, yy, getOrderMonth(rec) || "unknown", idx),
                     year: yy,
                     month: getOrderMonth(rec),
-                    isLocked: claimedOwners.has(getOrderIdentity(rec)),
-                    claimedBy: claimedOwners.get(getOrderIdentity(rec)) || "",
+                    isLocked: claimedOwners.has(getOrderOwnershipIdentity(rec)),
+                    claimedBy: claimedOwners.get(getOrderOwnershipIdentity(rec)) || "",
                 }));
 
                 // 6️⃣ cache the complete year; month buttons only filter this data
@@ -219,7 +206,9 @@ const Багцлах = () => {
     const loadBasketState = useCallback(async () => {
         const [basketResponse, itemResponse] = await Promise.all([
             axios.get(`${API_BASE_URL}/get/basket`),
-            axios.get(`${API_BASE_URL}/get/Items`),
+            axios.get(`${API_BASE_URL}/get/Items`, {
+                params: { includeReturned: true },
+            }),
         ]);
         const baskets = basketResponse.data || [];
         const items = itemResponse.data || [];
@@ -230,8 +219,15 @@ const Багцлах = () => {
         const basketMap = new Map(
             userBaskets.map((basket) => [String(basket.basket_id), basket])
         );
-        const userItems = items.filter(
+        const activeItems = items.filter((item) => !item.isReturned);
+        const userItems = activeItems.filter(
             (item) => String(item.userId) === String(user?.id)
+        );
+        const returnedItems = items.filter(
+            (item) =>
+                item.isReturned
+                && !item.isTenderReannounced
+                && String(item.userId) === String(user?.id)
         );
         const tempItems = tempBasket
             ? userItems.filter(
@@ -267,7 +263,15 @@ const Багцлах = () => {
                 };
             })
         );
-        return { userItems, allItems: items };
+        setReturnedOrders(
+            returnedItems.map((item) => ({
+                ...item,
+                key: `returned-${item.basketItemId}`,
+                year: getOrderYear(item),
+                month: getOrderMonth(item),
+            }))
+        );
+        return { userItems, allItems: activeItems };
     }, [API_BASE_URL, user?.id]);
     loadBasketStateRef.current = loadBasketState;
 
@@ -423,6 +427,8 @@ const Багцлах = () => {
                 const tagResponse = await axios.put(`${API_BASE_URL}/put/ReturnBasketItems`, {
                     basket_item_ids: returnedRows.map((item) => item.basketItemId),
                     user_id: user.id,
+                    tailbar: comment,
+                    cancel,
                 });
                 taggedCount = Number(tagResponse.data?.returned_count || 0);
             }
@@ -461,75 +467,35 @@ const Багцлах = () => {
             return;
         }
 
-        let selectedReasons = [];
-        let additionalComment = "";
-        let cancel = false;
+        let returnValues = {
+            selectedReasons: [],
+            additionalComment: "",
+            cancel: false,
+        };
         Modal.confirm({
             title: "Захиалга буцаах",
             width: 760,
             className: "return-order-modal",
-            content: (
-                <Space direction="vertical" size={16} className="return-order-form">
-                    <div className="return-order-heading">
-                        <div className="return-order-heading__title">Буцаах шалтгаан</div>
-                        <div className="return-order-heading__hint">Нэг эсвэл хэд хэдэн шалтгаан сонгож болно.</div>
-                    </div>
-                    <Checkbox.Group
-                        className="return-reason-group"
-                        onChange={(values) => {
-                            selectedReasons = values;
-                        }}
-                    >
-                        <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                            {returnCommentReasons.map((reason) => (
-                                <Checkbox
-                                    key={reason}
-                                    value={reason}
-                                    className="return-reason-option"
-                                >
-                                    {reason}
-                                </Checkbox>
-                            ))}
-                        </Space>
-                    </Checkbox.Group>
-                    <TextArea
-                        rows={3}
-                        className="return-order-comment"
-                        placeholder="Нэмэлт тайлбар бичих (заавал биш)"
-                        onChange={(event) => {
-                            additionalComment = event.target.value;
-                        }}
-                    />
-                    <div className="return-permanent-action">
-                        <div className="return-permanent-action__header">
-                            <LockOutlined /> Цуцлах
-                        </div>
-                        <Checkbox
-                            className="return-permanent-action__checkbox"
-                            onChange={(event) => {
-                                cancel = event.target.checked;
-                            }}
-                        >
-                            Захиалгыг дахин засварлах болон ашиглах боломжгүй болгох
-                        </Checkbox>
-                        <div className="return-permanent-action__warning">
-                            Үүнийг сонговол захиалгыг засварлан дахин илгээх боломжгүй. Зөвхөн захиалгыг бүр мөсөн хаах шаардлагатай үед сонгоно уу.
-                        </div>
-                    </div>
-                </Space>
-            ),
+            content: <ReturnOrderForm onValuesChange={(values) => { returnValues = values; }} />,
             okText: "Буцаах хүсэлт илгээх",
             cancelText: "Болих",
             okButtonProps: { danger: true },
             onOk: (close) => {
-                const comment = [...selectedReasons, additionalComment.trim()]
+                const comment = [
+                    ...returnValues.selectedReasons,
+                    returnValues.additionalComment.trim(),
+                ]
                     .filter(Boolean)
                     .join("; ");
                 if (!comment.trim()) {
                     message.warning("Буцаах шалтгаан сонгоно уу");
                     return;
                 }
-                submitReturn(comment.trim(), cancel).then((succeeded) => {
+                if (comment.length > 1000) {
+                    message.warning("Буцаах тайлбар нийт 1000 тэмдэгтээс хэтрэхгүй байна");
+                    return;
+                }
+                submitReturn(comment.trim(), returnValues.cancel).then((succeeded) => {
                     if (succeeded) close();
                 });
             },
@@ -687,8 +653,16 @@ const Багцлах = () => {
         () => new Set(packagedOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
         [packagedOrders]
     );
-    const mineOrders = mineOrderStatus === "packaged" ? packagedOrders : yourOrders;
-    const myPackageCount = unpackagedPackageCount + packagedPackageCount;
+    const returnedPackageCount = useMemo(
+        () => new Set(returnedOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
+        [returnedOrders]
+    );
+    const mineOrders = mineOrderStatus === "packaged"
+        ? packagedOrders
+        : mineOrderStatus === "returned"
+            ? returnedOrders
+            : yourOrders;
+    const myPackageCount = unpackagedPackageCount + packagedPackageCount + returnedPackageCount;
 
     if (!user) {
         return <div style={{ padding: 20 }}>Хэрэглэгч нэвтрээгүй байна.</div>;
@@ -813,7 +787,7 @@ const Багцлах = () => {
                                     Төлөвлөгөөнд оруулах ({selectedRows.length})
                                 </Button>
                             </>
-                        ) : (
+                        ) : mineOrderStatus === "packaged" ? (
                             <Button
                                 className="packing-action"
                                 disabled={loading || !selectedRows.length}
@@ -823,7 +797,7 @@ const Багцлах = () => {
                             >
                                 Багцаас хасах ({selectedRows.length})
                             </Button>
-                        )}
+                        ) : null}
                     </div>
                 </div>
             </section>
@@ -892,7 +866,7 @@ const Багцлах = () => {
                                 <span className="packing-tab-label">
                                     <UserOutlined />
                                     <strong>Миний сагс</strong>
-                                    <small>{myPackageCount.toLocaleString()} багц · {(yourOrders.length + packagedOrders.length).toLocaleString()} захиалга</small>
+                                    <small>{myPackageCount.toLocaleString()} багц · {(yourOrders.length + packagedOrders.length + returnedOrders.length).toLocaleString()} захиалга</small>
                                 </span>
                             ),
                             children: (
@@ -912,6 +886,13 @@ const Багцлах = () => {
                                                 icon: <AppstoreAddOutlined />,
                                                 packages: packagedPackageCount,
                                                 orders: packagedOrders.length,
+                                            },
+                                            {
+                                                key: "returned",
+                                                label: "Буцаасан",
+                                                icon: <RollbackOutlined />,
+                                                packages: returnedPackageCount,
+                                                orders: returnedOrders.length,
                                             },
                                         ].map((option) => (
                                             <button
@@ -937,7 +918,8 @@ const Багцлах = () => {
                                         onSelectRows={setSelectedRows}
                                         selectionResetToken={selectionResetToken}
                                         showOwner={false}
-                                        selectable
+                                        selectable={mineOrderStatus !== "returned"}
+                                        showReturnComment={mineOrderStatus === "returned"}
                                     />
                                 </>
                             ),

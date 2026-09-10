@@ -15,6 +15,14 @@ const externalOrderFields = [
   "techdate", "pkgno", "pkgdate", "pkgname",
 ];
 
+const normalizeIdentityDate = (value) => {
+  const normalized = String(unwrapValue(value) ?? "").trim().split(/[T ]/)[0];
+  const match = normalized.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  return match
+    ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`
+    : normalized;
+};
+
 export const normalizeExternalOrder = (record = {}) => {
   const valuesByLowercaseKey = new Map(
     Object.entries(record).map(([key, value]) => [key.toLocaleLowerCase(), unwrapValue(value)])
@@ -35,7 +43,7 @@ export const normalizeExternalOrder = (record = {}) => {
 export const getOrderIdentity = (item) =>
   [
     item.pkgno,
-    item.pkgdate,
+    normalizeIdentityDate(item.pkgdate),
     item.rid,
     item.zno,
     item.code,
@@ -47,6 +55,16 @@ export const getOrderIdentity = (item) =>
   ]
     .map((value) => String(unwrapValue(value) ?? "").trim())
     .join("-");
+
+export const getOrderOwnershipIdentity = (item) =>
+  [
+    item.pkgno,
+    normalizeIdentityDate(item.pkgdate),
+    item.pkgname,
+    item.code,
+  ]
+    .map((value) => String(unwrapValue(value) ?? "").trim().toLocaleLowerCase())
+    .join("|");
 
 export const getOrderRowKey = (item, year, month, index) =>
   `${year}-${month}-${getOrderIdentity(item)}-${String(

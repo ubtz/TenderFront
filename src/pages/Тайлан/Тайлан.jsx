@@ -1,177 +1,230 @@
-import React, { useState } from "react";
-import { Table, Button, Checkbox, Space, Card, Typography, Tooltip } from "antd";
-import { DownloadOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    Alert, Button, Card, Col, Input, Row, Segmented, Space,
+    Statistic, Table, Tag, Typography, message,
+} from "antd";
+import {
+    CheckCircleOutlined, ClockCircleOutlined, DownloadOutlined,
+    FileDoneOutlined, InboxOutlined, ReloadOutlined, SearchOutlined, TeamOutlined,
+} from "@ant-design/icons";
+import axios from "axios";
+import ReturnedOrders from "./ReturnedOrders";
+import "./Тайлан.css";
 
-const { Title, Text } = Typography;
+const { Text, Title } = Typography;
+const reportYears = ["2025", "2026", "2027"];
+const numberValue = (value) => Number(value) || 0;
 
 const Тайлан = () => {
-    // --- All columns ---
-    const allColumns = [
-        { title: "№", dataIndex: "index", key: "index", fixed: "left", width: 60, align: "center" },
-        { title: "Тендер шалгаруулалтын код", dataIndex: "code", key: "code", fixed: "left", width: 140 },
-        { title: "Тендер шалгаруулалтын нэр", dataIndex: "name", key: "name", fixed: "left", width: 160 },
-        { title: "Багцын нэр", dataIndex: "packageName", key: "packageName", fixed: "left", width: 140 },
-        { title: "Нийт төсөвт өртөг (мян.төг)", dataIndex: "totalBudget", key: "totalBudget", fixed: "left", width: 160 },
-        { title: "Багцын төсөвт өртөг (мян.төг)", dataIndex: "packageBudget", key: "packageBudget", fixed: "left", width: 160 },
-        { title: "Төрөл", dataIndex: "type", key: "type", width: 120 },
-        { title: "Тендер шалгаруулалтын арга", dataIndex: "method", key: "method", width: 200 },
-        { title: "Төлөвлөгөө, эх үүсвэр", dataIndex: "source", key: "source", width: 180 },
-        { title: "Захиалагч", dataIndex: "customer", key: "customer", width: 180 },
-        { title: "Хариуцсан мэргэжилтэн", dataIndex: "specialist", key: "specialist", width: 180 },
-        { title: "Үнэлгээний хороо байгуулсан огноо", dataIndex: "committeeDate", key: "committeeDate", width: 200 },
-        { title: "Тушаалын дугаар", dataIndex: "orderNumber", key: "orderNumber", width: 160 },
-        { title: "Үнэлгээний хорооны дарга", dataIndex: "committeeHead", key: "committeeHead", width: 180 },
-        { title: "Тендер зарлах хугацаа", dataIndex: "announcementPeriod", key: "announcementPeriod", width: 180 },
-        { title: "Тендер зарласан огноо", dataIndex: "announcementDate", key: "announcementDate", width: 180 },
-        { title: "Тендер нээсэн огноо", dataIndex: "openDate", key: "openDate", width: 180 },
-        { title: "Мэдэгдэл хүргүүлсэн огноо", dataIndex: "noticeDate", key: "noticeDate", width: 200 },
-        { title: "Шалгарсан этгээд", dataIndex: "winner", key: "winner", width: 180 },
-        { title: "Гэрээ байгуулсан огноo", dataIndex: "contractDate", key: "contractDate", width: 180 },
-        { title: "Гэрээний дугаар", dataIndex: "contractNumber", key: "contractNumber", width: 160 },
-        { title: "Гэрээ байгуулсан дүн", dataIndex: "contractAmount", key: "contractAmount", width: 160 },
-        { title: "Гэрээний валют", dataIndex: "currency", key: "currency", width: 140 },
-        { title: "Валютын ханш", dataIndex: "exchangeRate", key: "exchangeRate", width: 140 },
-        { title: "Гэрээ байгуулсан дүн (мян.төг)", dataIndex: "amountMNT", key: "amountMNT", width: 200 },
-        { title: "Гомдол гарсан эсэх /СЯ болон Монополын эсрэг газар/", dataIndex: "complaint", key: "complaint", width: 300 },
-        { title: "Дэлгэрэнгүй тайлбар", dataIndex: "description", key: "description", width: 300 },
+    const API_BASE_URL = import.meta.env.VITE_API_URL;
+    const [activeYear, setActiveYear] = useState(String(new Date().getFullYear()));
+    const [report, setReport] = useState({ rows: [], summary: {}, asOf: "" });
+    const [search, setSearch] = useState("");
+    const [loading, setLoading] = useState(false);
+    const requestId = useRef(0);
+
+    const loadReport = useCallback(async () => {
+        const currentRequest = ++requestId.current;
+        try {
+            setLoading(true);
+            const response = await axios.get(`${API_BASE_URL}/get/SpecialistReport`, {
+                params: { year: activeYear },
+            });
+            if (currentRequest !== requestId.current) return;
+            setReport({
+                returnedOrders: Array.isArray(response.data?.returnedOrders) ? response.data.returnedOrders : null,
+                rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+                summary: response.data?.summary || {},
+                asOf: response.data?.asOf || "",
+            });
+        } catch (error) {
+            if (currentRequest !== requestId.current) return;
+            setReport({ rows: [], summary: {}, asOf: "", returnedOrders: null });
+            console.error("Specialist report failed:", error);
+            message.error(error?.response?.data?.error || "Тайлангийн мэдээлэл татахад алдаа гарлаа");
+        } finally {
+            if (currentRequest === requestId.current) setLoading(false);
+        }
+    }, [API_BASE_URL, activeYear]);
+
+    useEffect(() => {
+        loadReport();
+        return () => { requestId.current += 1; };
+    }, [loadReport]);
+
+    const filteredRows = useMemo(() => {
+        const keyword = search.trim().toLocaleLowerCase("mn-MN");
+        if (!keyword) return report.rows;
+        return report.rows.filter((row) =>
+            String(row.specialistName || "").toLocaleLowerCase("mn-MN").includes(keyword)
+        );
+    }, [report.rows, search]);
+
+    const visibleTotals = useMemo(
+        () => filteredRows.reduce(
+            (totals, row) => ({
+                receivedOrders: totals.receivedOrders + numberValue(row.receivedOrders),
+                bundledOrders: totals.bundledOrders + numberValue(row.bundledOrders),
+                createdTenders: totals.createdTenders + numberValue(row.createdTenders),
+            }),
+            { receivedOrders: 0, bundledOrders: 0, createdTenders: 0 }
+        ),
+        [filteredRows]
+    );
+
+    const summary = report.summary;
+    const columns = [
+        {
+            title: "№", key: "index", width: 64, align: "center",
+            render: (_, __, index) => index + 1,
+        },
+        {
+            title: "Мэргэжилтний нэр", dataIndex: "specialistName", key: "specialistName", minWidth: 230,
+            render: (value) => (
+                <div className="report-specialist">
+                    <span className="report-specialist-avatar">
+                        {String(value || "?").trim().charAt(0).toUpperCase()}
+                    </span>
+                    <Text strong>{value || "Нэргүй хэрэглэгч"}</Text>
+                </div>
+            ),
+            sorter: (first, second) => String(first.specialistName).localeCompare(String(second.specialistName), "mn"),
+        },
+        {
+            title: "НХ-д ирсэн захиалга", dataIndex: "receivedOrders", key: "receivedOrders", width: 190, align: "right",
+            render: (value) => <strong>{numberValue(value).toLocaleString()}</strong>,
+            sorter: (first, second) => numberValue(first.receivedOrders) - numberValue(second.receivedOrders),
+        },
+        {
+            title: "Багцалсан захиалга", dataIndex: "bundledOrders", key: "bundledOrders", width: 190, align: "right",
+            render: (value) => <Tag color="cyan">{numberValue(value).toLocaleString()}</Tag>,
+            sorter: (first, second) => numberValue(first.bundledOrders) - numberValue(second.bundledOrders),
+        },
+        {
+            title: "Багцлаагүй үлдэгдэл", key: "remainingOrders", width: 190, align: "right",
+            render: (_, row) => {
+                const remaining = Math.max(0, numberValue(row.receivedOrders) - numberValue(row.bundledOrders));
+                return remaining > 0
+                    ? <Tag color="gold">{remaining.toLocaleString()}</Tag>
+                    : <Tag color="success">0</Tag>;
+            },
+            sorter: (first, second) =>
+                (numberValue(first.receivedOrders) - numberValue(first.bundledOrders)) -
+                (numberValue(second.receivedOrders) - numberValue(second.bundledOrders)),
+        },
+        {
+            title: "Үүсгэсэн тендер", dataIndex: "createdTenders", key: "createdTenders", width: 170, align: "right",
+            render: (value) => <Tag color="blue">{numberValue(value).toLocaleString()}</Tag>,
+            sorter: (first, second) => numberValue(first.createdTenders) - numberValue(second.createdTenders),
+        },
     ];
-
-    // --- Sample data ---
-    const data = [
-        { key: 1, index: 1, code: "TSH-001", name: "Зам барилгын ажил", packageName: "Багц 1", totalBudget: "100,000", packageBudget: "80,000", type: "Бараа", method: "НТШ", source: "ИБ" },
-        { key: 2, index: 2, code: "TSH-002", name: "Сургуулийн засвар", packageName: "Багц 2", totalBudget: "200,000", packageBudget: "150,000", type: "Ажил", method: "ХА", source: "ХО" },
-    ];
-
-    const fixedColumns = allColumns.slice(0, 6);
-    const optionalColumns = allColumns.slice(6);
-
-    const [selectedKeys, setSelectedKeys] = useState([]);
-    const visibleColumns = [
-        ...fixedColumns,
-        ...optionalColumns.filter((col) => selectedKeys.includes(col.key)),
-    ];
-
-    const handleCheckboxChange = (checkedValues) => setSelectedKeys(checkedValues);
 
     const exportToCsv = () => {
         const escapeCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-        const headers = visibleColumns.map((column) => column.title);
-        const csv = [
-            headers.map(escapeCell).join(","),
-            ...data.map((row) =>
-                visibleColumns.map((column) => escapeCell(row[column.dataIndex])).join(",")
-            ),
-        ].join("\r\n");
-        const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+        const csvRows = [
+            ["Мэргэжилтний нэр", "НХ-д ирсэн захиалга", "Багцалсан захиалга", "Багцлаагүй үлдэгдэл", "Үүсгэсэн тендер"],
+            ...filteredRows.map((row) => [
+                row.specialistName,
+                numberValue(row.receivedOrders),
+                numberValue(row.bundledOrders),
+                Math.max(0, numberValue(row.receivedOrders) - numberValue(row.bundledOrders)),
+                numberValue(row.createdTenders),
+            ]),
+            ["Нийт", visibleTotals.receivedOrders, visibleTotals.bundledOrders,
+                Math.max(0, visibleTotals.receivedOrders - visibleTotals.bundledOrders), visibleTotals.createdTenders],
+        ];
+        const blob = new Blob(
+            ["\uFEFF", csvRows.map((row) => row.map(escapeCell).join(",")).join("\r\n")],
+            { type: "text/csv;charset=utf-8" }
+        );
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = "Тайлан.csv";
+        link.download = `Худалдан-авах-ажиллагааны-тайлан-${activeYear}.csv`;
         link.click();
         URL.revokeObjectURL(url);
     };
 
     return (
-        <div
-            style={{
-                padding: 24,
-                background: "linear-gradient(180deg, #f9fafb 0%, #eef2f7 100%)",
-                minHeight: "100vh",
-            }}
-        >
-
-
-
-            <Card
-                style={{
-                    borderRadius: 16,
-                    background: "rgba(255,255,255,0.9)",
-                    boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
-                    marginBottom: 20,
-                }}
-                styles={{ body: { padding: "18px 20px" } }}
-            >
-                <Space style={{ marginBottom: 12, flexWrap: "wrap" }}>
-                    <Button
-                        type="primary"
-                        icon={<DownloadOutlined />}
-                        onClick={exportToCsv}
-                        style={{
-                            borderRadius: 8,
-                            background: "linear-gradient(135deg, #22c55e, #16a34a)",
-                        }}
-                    >
-                        CSV файл гаргах
-                    </Button>
-
-                    <Button
-                        icon={
-                            selectedKeys.length === optionalColumns.length ? (
-                                <EyeInvisibleOutlined />
-                            ) : (
-                                <EyeOutlined />
-                            )
-                        }
-                        onClick={() =>
-                            setSelectedKeys(
-                                selectedKeys.length === optionalColumns.length
-                                    ? []
-                                    : optionalColumns.map((c) => c.key)
-                            )
-                        }
-                        style={{
-                            borderRadius: 8,
-                        }}
-                    >
-                        {selectedKeys.length === optionalColumns.length
-                            ? "Бүгдийг нуух"
-                            : "Бүгдийг харуулах"}
-                    </Button>
+        <div className="procurement-report-page">
+            <section className="report-heading">
+                <div>
+                    <div className="report-eyebrow">ХУДАЛДАН АВАХ АЖИЛЛАГААНЫ ТАЙЛАН</div>
+                    <Title level={2}>Цахим системд оруулсан мэдээлэл</Title>
+                    <Text type="secondary">Захиалга, багцлалт болон тендерийн одоогийн төлөвийг мэргэжилтэн тус бүрээр харуулна.</Text>
+                </div>
+                <Space wrap className="report-actions">
+                    <Segmented value={activeYear} onChange={setActiveYear} options={reportYears} />
+                    <Button icon={<ReloadOutlined />} onClick={loadReport} loading={loading}>Шинэчлэх</Button>
+                    <Button type="primary" icon={<DownloadOutlined />} onClick={exportToCsv} disabled={!filteredRows.length}>CSV татах</Button>
                 </Space>
+            </section>
 
-                <div
-                    style={{
-                        border: "1px solid #e2e8f0",
-                        borderRadius: 12,
-                        padding: 12,
-                        background: "#f8fafc",
-                        marginBottom: 16,
-                    }}
-                >
-                    <Text strong style={{ display: "block", marginBottom: 8, color: "#0f172a" }}>
-                        Багана сонгох:
-                    </Text>
-                    <Checkbox.Group
-                        style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px" }}
-                        value={selectedKeys}
-                        onChange={handleCheckboxChange}
-                    >
-                        {optionalColumns.map((col) => (
-                            <Tooltip key={col.key} title={col.title}>
-                                <Checkbox value={col.key}>{col.title}</Checkbox>
-                            </Tooltip>
-                        ))}
-                    </Checkbox.Group>
-                </div>
+            <Alert
+                className="report-summary-note"
+                type="info"
+                showIcon
+                message={`${activeYear} оны байдлаар нийт ${numberValue(summary.totalPackages).toLocaleString()} багцын ${numberValue(summary.totalOrders).toLocaleString()} захиалга бүртгэгдсэн байна.`}
+                description={`Үүнээс ${numberValue(summary.acceptedPackages).toLocaleString()} багцын ${numberValue(summary.acceptedOrders).toLocaleString()} захиалгыг НХ алба хүлээн авсан. ${numberValue(summary.unacceptedPackages).toLocaleString()} багцын ${numberValue(summary.unacceptedOrders).toLocaleString()} захиалга хүлээгдэж байна.`}
+            />
 
-                <div
-                    style={{
-                        borderRadius: 12,
-                        overflow: "hidden",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                    }}
-                >
-                    <Table
-                        bordered
-                        size="small"
-                        columns={visibleColumns}
-                        dataSource={data}
-                        pagination={false}
-                        scroll={{ x: "max-content", y: 500 }}
-                        style={{ borderRadius: 12 }}
-                    />
+            <Row gutter={[14, 14]} className="report-stat-grid">
+                <Col xs={24} sm={12} xl={6}>
+                    <Card className="report-stat-card report-stat-card--blue">
+                        <Statistic title="Нийт захиалга" value={numberValue(summary.totalOrders)} prefix={<InboxOutlined />} />
+                        <span>{numberValue(summary.totalPackages).toLocaleString()} багц</span>
+                    </Card>
+                </Col>
+                <Col xs={24} sm={12} xl={6}>
+                    <Card className="report-stat-card report-stat-card--green">
+                        <Statistic title="НХ алба хүлээн авсан" value={numberValue(summary.acceptedOrders)} prefix={<CheckCircleOutlined />} />
+                        <span>{numberValue(summary.acceptedPackages).toLocaleString()} багц</span>
+                    </Card>
+                </Col>
+                <Col xs={24} sm={12} xl={6}>
+                    <Card className="report-stat-card report-stat-card--amber">
+                        <Statistic title="Хүлээгдэж буй" value={numberValue(summary.unacceptedOrders)} prefix={<ClockCircleOutlined />} />
+                        <span>{numberValue(summary.unacceptedPackages).toLocaleString()} багц</span>
+                    </Card>
+                </Col>
+                <Col xs={24} sm={12} xl={6}>
+                    <Card className="report-stat-card report-stat-card--violet">
+                        <Statistic title="Үүсгэсэн тендер" value={visibleTotals.createdTenders} prefix={<FileDoneOutlined />} />
+                        <span>{report.rows.length.toLocaleString()} мэргэжилтэн</span>
+                    </Card>
+                </Col>
+            </Row>
+
+            <Card className="report-table-card" styles={{ body: { padding: 0 } }}>
+                <div className="report-table-toolbar">
+                    <div>
+                        <Title level={4}><TeamOutlined /> Мэргэжилтний гүйцэтгэл</Title>
+                        <Text type="secondary">{report.asOf ? `Шинэчилсэн: ${report.asOf}` : "Одоогийн мэдээлэл"}</Text>
+                    </div>
+                    <Input allowClear prefix={<SearchOutlined />} placeholder="Мэргэжилтний нэрээр хайх" value={search} onChange={(event) => setSearch(event.target.value)} />
                 </div>
+                <Table
+                    rowKey="userId"
+                    columns={columns}
+                    dataSource={filteredRows}
+                    loading={loading}
+                    pagination={false}
+                    scroll={{ x: 1050 }}
+                    summary={() => (
+                        <Table.Summary fixed>
+                            <Table.Summary.Row className="report-total-row">
+                                <Table.Summary.Cell index={0} />
+                                <Table.Summary.Cell index={1}><strong>Нийт</strong></Table.Summary.Cell>
+                                <Table.Summary.Cell index={2} align="right"><strong>{visibleTotals.receivedOrders.toLocaleString()}</strong></Table.Summary.Cell>
+                                <Table.Summary.Cell index={3} align="right"><strong>{visibleTotals.bundledOrders.toLocaleString()}</strong></Table.Summary.Cell>
+                                <Table.Summary.Cell index={4} align="right"><strong>{Math.max(0, visibleTotals.receivedOrders - visibleTotals.bundledOrders).toLocaleString()}</strong></Table.Summary.Cell>
+                                <Table.Summary.Cell index={5} align="right"><strong>{visibleTotals.createdTenders.toLocaleString()}</strong></Table.Summary.Cell>
+                            </Table.Summary.Row>
+                        </Table.Summary>
+                    )}
+                />
             </Card>
+            <ReturnedOrders key={activeYear} orders={report.returnedOrders} year={activeYear} loading={loading} />
         </div>
     );
 };

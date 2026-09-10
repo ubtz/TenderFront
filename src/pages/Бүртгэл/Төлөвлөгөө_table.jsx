@@ -585,6 +585,11 @@ const ТөлөвлөгөөTable = () => {
     };
 
     const openTenderModal = async (plan) => {
+        if ((plan?.inbox_items || []).length > 0) {
+            message.warning("Хуваарилаагүй захиалгыг багцад бүрэн хуваарилсны дараа тендер үүсгэнэ");
+            return;
+        }
+
         setCurrentPlan(plan);
         setTenderNumber("");
         setSelectedBasketIds([]);
@@ -616,6 +621,11 @@ const ТөлөвлөгөөTable = () => {
     );
 
     const saveTender = async () => {
+        if ((currentPlan?.inbox_items || []).length > 0) {
+            message.warning("Хуваарилаагүй захиалгыг багцад бүрэн хуваарилсны дараа тендер үүсгэнэ");
+            return;
+        }
+
         const normalizedTenderNumber = tenderNumber.trim();
         if (!normalizedTenderNumber) {
             message.warning("Тендерийн дугаар оруулна уу");
@@ -653,7 +663,11 @@ const ТөлөвлөгөөTable = () => {
             setTenderNumber("");
         } catch (error) {
             console.error("Tender creation failed:", error);
-            message.error(error.response?.data?.message || "Тендер үүсгэхэд алдаа гарлаа");
+            message.error(
+                error.response?.data?.message
+                || error.response?.data?.error
+                || "Тендер үүсгэхэд алдаа гарлаа"
+            );
         } finally {
             setTenderLoading(false);
         }
@@ -822,15 +836,24 @@ const ТөлөвлөгөөTable = () => {
             render: (_, record) => (
                 <Space onClick={(event) => event.stopPropagation()}>
                     {!isManager && (
-                        <Button
-                            className="plan-create-tender-button"
-                            type="primary"
-                            size="small"
-                            icon={<FileAddOutlined />}
-                            onClick={() => openTenderModal(record)}
+                        <Tooltip
+                            title={record.pending_count > 0
+                                ? "Хуваарилаагүй захиалгыг багцад бүрэн хуваарилсны дараа тендер үүсгэнэ"
+                                : ""}
                         >
-                            Тендер үүсгэх
-                        </Button>
+                            <span>
+                                <Button
+                                    className="plan-create-tender-button"
+                                    type="primary"
+                                    size="small"
+                                    icon={<FileAddOutlined />}
+                                    disabled={record.pending_count > 0}
+                                    onClick={() => openTenderModal(record)}
+                                >
+                                    Тендер үүсгэх
+                                </Button>
+                            </span>
+                        </Tooltip>
                     )}
                     <PrintIcon
                         normData={record}

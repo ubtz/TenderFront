@@ -58,7 +58,7 @@ export const sendHeartbeat = async () => {
     },
   });
 
-  if (response.data?.token) {
+  if (response.data?.token && getToken() === token) {
     localStorage.setItem("token", response.data.token);
   }
 };
@@ -71,11 +71,14 @@ export const startSessionHeartbeat = (onFailure) => {
   const beat = async () => {
     if (stopped || requestInFlight || document.visibilityState !== "visible") return;
 
+    const token = getToken();
     requestInFlight = true;
     try {
       await sendHeartbeat();
     } catch (error) {
       if (stopped || failureHandled) return;
+      // A temporary outage is not an authentication rejection. Retry next time.
+      if (![401, 403].includes(error.response?.status) || getToken() !== token) return;
       failureHandled = true;
       stopped = true;
       localStorage.removeItem("token");

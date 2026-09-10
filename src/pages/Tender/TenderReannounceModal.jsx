@@ -68,13 +68,11 @@ const buildPackageTree = (items) => {
 
 const getCodeRows = (tree) => tree.flatMap((pkg) => pkg.children || []);
 
-const buildPayload = (basketTree, selectedKeySet) => {
+const buildPayload = (basketTree, selectedKeySet, tailbar) => {
   const packages = new Map();
-  let tailbar = "";
   getCodeRows(basketTree).forEach((code) => {
     if (!selectedKeySet.has(code.key)) return;
     code.sourceItems.forEach((item) => {
-      if (!tailbar) tailbar = normalize(item.tailbar || item.Tailbar);
       const pkgno = normalize(item.pkgno);
       const pkgdate = normalizeDate(item.pkgdate);
       const pkgname = normalize(item.pkgname);
@@ -91,18 +89,26 @@ const buildPayload = (basketTree, selectedKeySet) => {
       if (!pkg.codes.has(code.code)) {
         pkg.codes.set(code.code, {
           code: code.code,
+          basketIds: new Set(),
         });
+      }
+      const basketId = Number(item.basket_id);
+      if (Number.isInteger(basketId) && basketId > 0) {
+        pkg.codes.get(code.code).basketIds.add(basketId);
       }
     });
   });
 
   return {
-    tailbar,
+    tailbar: normalize(tailbar),
     packages: [...packages.values()].map((pkg) => ({
       pkgno: pkg.pkgno,
       pkgdate: pkg.pkgdate,
       pkgname: pkg.pkgname,
-      codes: [...pkg.codes.values()],
+      codes: [...pkg.codes.values()].map((code) => ({
+        code: code.code,
+        basketIds: [...code.basketIds],
+      })),
     })),
   };
 };
@@ -114,6 +120,7 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
   const [selectedCodeKeys, setSelectedCodeKeys] = useState([]);
   const [expandedPackageKeys, setExpandedPackageKeys] = useState([]);
   const [searchText, setSearchText] = useState("");
+  const [tailbar, setTailbar] = useState("");
   const [currentStep, setCurrentStep] = useState(0);
   const packageTree = useMemo(() => buildPackageTree(items), [items]);
   const codeRows = useMemo(() => getCodeRows(packageTree), [packageTree]);
@@ -124,8 +131,8 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
     return children.length ? [{ ...basket, children }] : [];
   }), [packageTree, selectedKeySet]);
   const preparedPayload = useMemo(
-    () => buildPayload(packageTree, selectedKeySet),
-    [packageTree, selectedKeySet]
+    () => buildPayload(packageTree, selectedKeySet, tailbar),
+    [packageTree, selectedKeySet, tailbar]
   );
 
   const filteredTree = useMemo(() => {
@@ -149,7 +156,11 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
       const response = await axios.get(`${API_BASE_URL}/get/GetBasketItemsById/${ids}`);
       const nextItems = response.data || [];
       const nextTree = buildPackageTree(nextItems);
+      const existingTailbar = nextItems
+        .map((item) => normalize(item.tailbar || item.Tailbar))
+        .find(Boolean) || "";
       setItems(nextItems);
+      setTailbar(existingTailbar);
       setSelectedCodeKeys([]);
       setExpandedPackageKeys(nextTree.map((pkg) => pkg.key));
     } catch (error) {
@@ -167,6 +178,7 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
       setSelectedCodeKeys([]);
       setExpandedPackageKeys([]);
       setSearchText("");
+      setTailbar("");
       setCurrentStep(0);
     }
   }, [open, record?.basket_ids]);
@@ -189,6 +201,10 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
   const submitReannounce = async () => {
     if (recycleCount <= 0) {
       message.warning("Дахин зарлах дор хаяж нэг захиалга сонгоно уу");
+      return;
+    }
+    if (!tailbar.trim()) {
+      message.warning("Тайлбар оруулна уу");
       return;
     }
     console.log("[Tender reannounce] submit payload", preparedPayload);
@@ -296,12 +312,9 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
         <Button key="next" type="primary" onClick={() => setCurrentStep(1)} disabled={recycleCount === 0}>
           Дараах
         </Button>,
-      ] : currentStep === 1 ? [
-        <Button key="back" onClick={() => setCurrentStep(0)}>Буцах</Button>,
-        <Button key="next" type="primary" onClick={() => setCurrentStep(2)}>Body шалгах</Button>,
       ] : [
-        <Button key="back" onClick={() => setCurrentStep(1)} disabled={submitting}>Буцах</Button>,
-        <Button key="prepare" type="primary" danger icon={<RetweetOutlined />} loading={submitting} onClick={submitReannounce}>Дахин зарлахыг батлах</Button>,
+        <Button key="back" onClick={() => setCurrentStep(0)} disabled={submitting}>Буцах</Button>,
+        <Button key="submit" type="primary" danger icon={<RetweetOutlined />} loading={submitting} onClick={submitReannounce}>Дахин зарлахыг батлах</Button>,
       ]}
     >
       <Steps
@@ -310,22 +323,19 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
         className="tender-reannounce-steps"
         items={[
           { title: "Үр дүн сонгох", description: "Үлдэх захиалга" },
-          { title: "Дахин зарлах", description: "Багц, код шалгах" },
-          { title: "Body бэлтгэх", description: "API-д бэлэн болгох" },
+          { title: "Дахин зарлах", description: "Багц, код, тайлбар шалгах" },
         ]}
       />
       <div className="tender-reannounce-intro">
         <div>
-          <Text strong>{currentStep === 0 ? "1. Багцын захиалга бүрийг шалгах" : currentStep === 1 ? "2. Дахин зарлах захиалгыг баталгаажуулах" : "3. API body-г шалгаж бэлтгэх"}</Text>
+          <Text strong>{currentStep === 0 ? "1. Багцын захиалга бүрийг шалгах" : "2. Дахин зарлах захиалгыг баталгаажуулах"}</Text>
           <Text type="secondary">
             {currentStep === 0
               ? "Чагталсан захиалга дахин зарлагдана. Чагтлаагүй захиалга гэрээ үүсгэх шатанд үргэлжилнэ."
-              : currentStep === 1
-                ? "Энд зөвхөн дахин зарлагдах багц болон нэгтгэсэн кодууд харагдана."
-                : "Баталсны дараа одоогийн тендер түүхэд хадгалагдаж, гадаад системийн мэдээлэл хүлээнэ."}
+              : "Дахин зарлах багц, кодуудаа шалгаад тайлбар оруулна уу."}
           </Text>
         </div>
-        <Tag bordered={false}>API холбогдоогүй</Tag>
+        <Tag bordered={false} color="green">Гадаад API холбогдсон</Tag>
       </div>
 
       <div className="tender-reannounce-summary">
@@ -360,21 +370,27 @@ const TenderReannounceModal = ({ open, record, onClose, onArchived }) => {
       )}
 
       {currentStep === 1 && (
-        <Table
-          rowKey="key"
-          columns={columns.filter((column) => column.key !== "decision")}
-          dataSource={recycleTree}
-          pagination={false}
-          scroll={{ y: 460, x: 840 }}
-          expandable={{ defaultExpandAllRows: true, indentSize: 24 }}
-          rowClassName={(row) => row.type === "basket" ? "is-package" : "is-recycle"}
-        />
-      )}
-
-      {currentStep === 2 && (
-        <div className="tender-reannounce-payload">
-          <Alert type="info" showIcon message={`${preparedPayload.packages.length} эх багц API body-д бэлтгэгдлээ`} />
-          <pre>{JSON.stringify(preparedPayload, null, 2)}</pre>
+        <div className="tender-reannounce-confirmation">
+          <div className="tender-reannounce-comment">
+            <Text strong>Тайлбар</Text>
+            <Input.TextArea
+              value={tailbar}
+              onChange={(event) => setTailbar(event.target.value)}
+              placeholder="Дахин зарлах болсон шалтгаан, тайлбарыг оруулна уу..."
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              maxLength={1000}
+              showCount
+            />
+          </div>
+          <Table
+            rowKey="key"
+            columns={columns.filter((column) => column.key !== "decision")}
+            dataSource={recycleTree}
+            pagination={false}
+            scroll={{ y: 390, x: 840 }}
+            expandable={{ defaultExpandAllRows: true, indentSize: 24 }}
+            rowClassName={(row) => row.type === "basket" ? "is-package" : "is-recycle"}
+          />
         </div>
       )}
     </Modal>

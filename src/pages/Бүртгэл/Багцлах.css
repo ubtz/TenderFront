@@ -435,6 +435,17 @@
   box-shadow: inset 3px 0 0 #8968ab;
 }
 
+.packing-ownership-card--returned .packing-ownership-card__icon {
+  background: #f7e8e8;
+  color: #9b5757;
+}
+
+.packing-ownership-card--returned.is-active {
+  border-color: #d6a3a3;
+  background: #fff3f3;
+  box-shadow: inset 3px 0 0 #b96d6d;
+}
+
 .packing-filterbar__label {
   color: #647789;
   font-size: 12px;

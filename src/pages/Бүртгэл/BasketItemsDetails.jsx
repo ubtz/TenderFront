@@ -1,17 +1,58 @@
-import React, { useEffect, useState } from "react";
-import { Table, Spin, message, Checkbox, Input, Button, Tag, Typography } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Table, Spin, message, Input, InputNumber, DatePicker, Progress, Button, Tag, Typography } from "antd";
 import {
+    CheckCircleOutlined,
+    ClockCircleOutlined,
+    DeleteOutlined,
     DownOutlined,
     InboxOutlined,
+    PlusOutlined,
     RightOutlined,
+    SearchOutlined,
     ShoppingCartOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
+import dayjs from "dayjs";
+import PropTypes from "prop-types";
 import { getStoredUser } from "../../api/session";
+import { createDebouncedSaveQueue } from "../../utils/debouncedSaveQueue";
 import "./BasketItemsDetails.css";
 
 const { Text } = Typography;
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 const toNumber = (value) => Number(String(value ?? "").replace(/,/g, "")) || 0;
+const parseArrivalList = (value) => {
+    try {
+        const parsed = JSON.parse(value || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+const getArrivedQuantity = (item) => parseArrivalList(item?.tailbar).reduce(
+    (sum, arrival) => sum + Math.max(0, toNumber(arrival?.qty)),
+    0
+);
+const isFullyArrived = (item) => {
+    const orderedQuantity = Math.max(0, toNumber(item?.qty));
+    return orderedQuantity > 0 && getArrivedQuantity(item) >= orderedQuantity;
+};
+const calculateArrivalPercent = (arrivalItems) => {
+    const orderedQuantity = arrivalItems.reduce(
+        (sum, item) => sum + Math.max(0, toNumber(item.qty)),
+        0
+    );
+    const arrivedQuantity = arrivalItems.reduce(
+        (sum, item) => sum + Math.min(
+            Math.max(0, toNumber(item.qty)),
+            getArrivedQuantity(item)
+        ),
+        0
+    );
+    return orderedQuantity > 0
+        ? Math.min(100, Math.round((arrivedQuantity / orderedQuantity) * 100))
+        : 0;
+};
 
 const formatCposCode = (value) => {
     const code = String(value || "").trim().replace(/-/g, "");
@@ -42,12 +83,22 @@ const bundleItemsByCode = (items) => {
     }));
 };
 
-const BasketItemsDetails = ({ basketIds, mode }) => {
+const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArrivalProgressChange, itemScrollY }) => {
     const [loading, setLoading] = useState(false);
     const [items, setItems] = useState([]);
     const [branches, setBranches] = useState([]);
     const [expandedRowKeys, setExpandedRowKeys] = useState([]);
-    const API_BASE_URL = import.meta.env.VITE_API_URL;
+    const [basketSearches, setBasketSearches] = useState({});
+    const arrivalSaves = useRef(null);
+    if (!arrivalSaves.current) {
+        arrivalSaves.current = createDebouncedSaveQueue({
+            save: (payload) => axios.put(`${API_BASE_URL}/put/basketitem/state`, payload),
+            onError: (error) => {
+                console.error("❌ Failed to update arrivals:", error);
+                message.error("Ирсэн мэдээллийг хадгалж чадсангүй");
+            },
+        });
+    }
 
     const user = getStoredUser();
     const isUdirdlaga =
@@ -77,17 +128,12 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
         return branch ? `${branch.service} (${branch.shortName})` : shortName;
     };
 
-    // ✅ Fetch basket items
-    useEffect(() => {
-        if (!basketIds?.length) return;
-        fetchBasketItems(Array.isArray(basketIds) ? basketIds.join(",") : basketIds);
-    }, [basketIds]);
-
-
-    const fetchBasketItems = async (ids) => {
+    const fetchBasketItems = useCallback(async (ids) => {
         setLoading(true);
         try {
-            const res = await axios.get(`${API_BASE_URL}/get/GetBasketItemsById/${ids}`);
+            const res = await axios.get(`${API_BASE_URL}/get/GetBasketItemsById/${ids}`, {
+                params: includeReturned ? { includeReturned: true } : undefined,
+            });
             setItems(res.data || []);
             console.log("✅ Fetched basket items:", res.data);
         } catch (err) {
@@ -95,7 +141,43 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             message.error("Сагсны өгөгдөл авахад алдаа гарлаа.");
         }
         setLoading(false);
-    };
+    }, [includeReturned]);
+
+    useEffect(() => {
+        if (!basketIds?.length) {
+            setItems([]);
+            return;
+        }
+        fetchBasketItems(Array.isArray(basketIds) ? basketIds.join(",") : basketIds);
+    }, [basketIds, fetchBasketItems]);
+
+    useEffect(() => {
+        const saves = arrivalSaves.current;
+        return () => { void saves.flush(); };
+    }, []);
+
+    useEffect(() => {
+        if (mode === "geree" && items.length > 0 && onArrivalProgressChange) {
+            onArrivalProgressChange(calculateArrivalPercent(items));
+        }
+    }, [items, mode, onArrivalProgressChange]);
+
+    const updateArrivalList = useCallback((record, newList) => {
+        const tailbar = JSON.stringify(newList);
+        const nextRecord = { ...record, tailbar };
+        const arrived = isFullyArrived(nextRecord);
+        setItems((current) => current.map((item) =>
+            item.basket_item_id === record.basket_item_id
+                ? { ...item, tailbar, isArrived: arrived }
+                : item
+        ));
+
+        arrivalSaves.current.schedule(record.basket_item_id, {
+            basket_item_id: record.basket_item_id,
+            tailbar,
+            isArrived: arrived,
+        });
+    }, []);
 
     if (loading) {
         return (
@@ -208,16 +290,7 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             title: "Ирсэн %",
             key: "arrivedPercent",
             align: "center",
-            render: (_, record) => {
-                const basketItems = record.items || [];
-                const arrivedCount = basketItems.filter((i) => i.isArrived).length;
-                const totalCount = basketItems.length || record.count || 0;
-                const percent =
-                    totalCount > 0
-                        ? ((arrivedCount / totalCount) * 100).toFixed(0)
-                        : 0;
-                return <b>{percent}%</b>;
-            },
+            render: (_, record) => <b>{calculateArrivalPercent(record.items || [])}%</b>,
         });
     }
 
@@ -280,177 +353,152 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
 
     // ✅ Extra editable columns (only for geree mode, not for удирдлага)
     if (mode === "geree") {
-        itemColumns.push(
-            {
-                title: "Ирсэн эсэх",
-                dataIndex: "isArrived",
-                key: "isArrived",
-                align: "center",
-                render: (value, record) => {
-                    // parse arrival info (array)
-                    const arrivalList = (() => {
-                        try {
-                            return JSON.parse(record.tailbar || "[]");
-                        } catch {
-                            return [];
-                        }
-                    })();
-
-                    const totalArrived = arrivalList.reduce(
-                        (sum, a) => sum + (Number(a.qty) || 0),
-                        0
-                    );
-
-                    const isFullyArrived = totalArrived >= Number(record.qty || 0);
-
-                    // auto-update if needed
-                    if (isFullyArrived && !record.isArrived) {
-                        (async () => {
-                            try {
-                                await axios.put(`${API_BASE_URL}/put/basketitem/state`, {
-                                    basket_item_id: record.basket_item_id,
-                                    isArrived: true,
-                                });
-                                record.isArrived = true;
-                            } catch (err) {
-                                console.error("❌ Auto update isArrived failed:", err);
-                            }
-                        })();
-                    }
-
-                    return (
-                        <Checkbox
-                            checked={isFullyArrived || !!value}
-                            disabled={true} // auto-calculated
-                        />
-                    );
-                },
-            },
-            {
-                title: "Ирсэн мэдээлэл",
+        itemColumns.push({
+                title: "Хүлээн авалт",
                 dataIndex: "tailbar",
-                key: "tailbar",
+                key: "arrival",
+                width: 350,
                 render: (value, record) => {
-                    const arrivalList = (() => {
-                        try {
-                            return JSON.parse(value || "[]");
-                        } catch {
-                            return [];
-                        }
-                    })();
+                    const arrivalList = parseArrivalList(value);
+                    const orderedQuantity = Math.max(0, toNumber(record.qty));
+                    const totalArrived = getArrivedQuantity(record);
+                    const percent = orderedQuantity > 0
+                        ? Math.min(100, Math.round((totalArrived / orderedQuantity) * 100))
+                        : 0;
+                    const fullyArrived = isFullyArrived(record);
+                    const statusText = fullyArrived
+                        ? "Бүрэн ирсэн"
+                        : totalArrived > 0
+                            ? "Хэсэгчлэн ирсэн"
+                            : "Ирээгүй";
 
-                    const handleUpdate = async (newList) => {
-                        const updated = items.map((it) =>
-                            it.basket_item_id === record.basket_item_id
-                                ? { ...it, tailbar: JSON.stringify(newList) }
-                                : it
-                        );
-                        setItems(updated);
-                        try {
-                            await axios.put(`${API_BASE_URL}/put/basketitem/state`, {
-                                basket_item_id: record.basket_item_id,
-                                tailbar: JSON.stringify(newList),
-                            });
-                        } catch (err) {
-                            console.error("❌ Failed to update arrivals:", err);
-                        }
-                    };
-
-                    const addNew = () => handleUpdate([...arrivalList, { qty: 0, date: null }]);
+                    const addNew = () => updateArrivalList(record, [
+                        ...arrivalList,
+                        { qty: 0, date: dayjs().format("YYYY-MM-DD") },
+                    ]);
 
                     const updateField = (idx, key, value) => {
                         const newList = arrivalList.map((a, i) =>
                             i === idx ? { ...a, [key]: value } : a
                         );
-                        handleUpdate(newList);
+                        updateArrivalList(record, newList);
                     };
 
                     const removeField = (idx) =>
-                        handleUpdate(arrivalList.filter((_, i) => i !== idx));
-
-                    const totalArrived = arrivalList.reduce(
-                        (sum, a) => sum + (Number(a.qty) || 0),
-                        0
-                    );
+                        updateArrivalList(record, arrivalList.filter((_, i) => i !== idx));
 
                     return (
-                        <div>
+                        <div className={`arrival-editor ${fullyArrived ? "arrival-editor--complete" : ""}`}>
+                            <div className="arrival-editor__summary">
+                                <span className="arrival-editor__status">
+                                    {fullyArrived ? <CheckCircleOutlined /> : <ClockCircleOutlined />}
+                                    {statusText}
+                                </span>
+                                <strong>{totalArrived.toLocaleString()} / {orderedQuantity.toLocaleString()}</strong>
+                            </div>
+                            <Progress
+                                percent={percent}
+                                showInfo={false}
+                                size="small"
+                                strokeColor={fullyArrived ? "#4f9a73" : "#5c8fa8"}
+                                trailColor="#e7eef1"
+                            />
                             {arrivalList.map((a, idx) => (
-                                <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                                    <Input
-                                        type="number"
+                                <div key={`${idx}-${a.date || "new"}`} className="arrival-editor__entry">
+                                    <span className="arrival-editor__entry-number">{idx + 1}</span>
+                                    <InputNumber
+                                        size="small"
                                         min={0}
                                         value={a.qty}
                                         placeholder="Тоо"
                                         disabled={isUdirdlaga}
-                                        onChange={(e) =>
-                                            updateField(idx, "qty", Number(e.target.value))
-                                        }
-                                        style={{ width: 80 }}
+                                        onChange={(quantity) => updateField(idx, "qty", Number(quantity || 0))}
                                     />
-                                    <Input
-                                        type="date"
-                                        value={a.date || ""}
+                                    <DatePicker
+                                        size="small"
+                                        value={a.date && dayjs(a.date).isValid() ? dayjs(a.date) : null}
+                                        format="YYYY/MM/DD"
+                                        placeholder="Огноо"
                                         disabled={isUdirdlaga}
-                                        onChange={(e) => updateField(idx, "date", e.target.value)}
-                                        style={{ width: 150 }}
+                                        onChange={(date) => updateField(
+                                            idx,
+                                            "date",
+                                            date ? date.format("YYYY-MM-DD") : null
+                                        )}
                                     />
                                     {!isUdirdlaga && (
-                                        <button
+                                        <Button
+                                            type="text"
+                                            danger
+                                            size="small"
+                                            icon={<DeleteOutlined />}
+                                            aria-label="Ирэлтийн мөр устгах"
                                             onClick={() => removeField(idx)}
-                                            style={{
-                                                background: "none",
-                                                border: "none",
-                                                color: "red",
-                                                cursor: "pointer",
-                                            }}
-                                        >
-                                            ✕
-                                        </button>
+                                        />
                                     )}
                                 </div>
                             ))}
-                            {!isUdirdlaga && (
-                                <button
-                                    onClick={addNew}
-                                    style={{
-                                        background: "#f0f0f0",
-                                        border: "1px dashed #ccc",
-                                        borderRadius: 4,
-                                        padding: "2px 8px",
-                                        cursor: "pointer",
-                                        fontSize: 12,
-                                    }}
-                                >
-                                    ➕ Нэмэх
-                                </button>
+                            {!arrivalList.length && (
+                                <div className="arrival-editor__empty">Ирсэн тоо, огноо бүртгэгдээгүй</div>
                             )}
-                            <div style={{ marginTop: 4, fontSize: 12, color: "#555" }}>
-                                Нийт ирсэн: <b>{totalArrived.toLocaleString()}</b> /{" "}
-                                <b>{record.qty?.toLocaleString()}</b>
-                            </div>
+                            {!isUdirdlaga && (
+                                <Button
+                                    block
+                                    size="small"
+                                    type="dashed"
+                                    icon={<PlusOutlined />}
+                                    className="arrival-editor__add"
+                                    onClick={addNew}
+                                >
+                                    {arrivalList.length ? "Дахин ирэлт нэмэх" : "Ирэлт бүртгэх"}
+                                </Button>
+                            )}
                         </div>
                     );
                 },
-            }
-        );
+            });
     }
 
 
     // ✅ Expanded row
-    const expandedRowRender = (record) => (
+    const expandedRowRender = (record) => {
+        const search = basketSearches[record.key] || "";
+        const keywords = search.trim().toLocaleLowerCase("mn-MN").split(/\s+/).filter(Boolean);
+        const filteredItems = record.bundled_items.filter((item) => {
+            const searchableText = [item, ...(item.source_items || [])].flatMap((source) => [
+                source.cr4name, source.code, formatCposCode(source.code), source.crmarkname,
+                source.crbrandname, source.dname, getServiceByShortName(source.dname),
+                source.pkgname, source.pkgno, source.mname,
+            ]).filter(Boolean).join(" ").toLocaleLowerCase("mn-MN");
+            return keywords.every((keyword) => searchableText.includes(keyword));
+        });
+        return (
         <div className="basket-items-expanded">
             <div className="basket-items-expanded__header">
                 <div className="basket-items-expanded__title">
-                    <ShoppingCartOutlined /> <strong>{record.basket_name}</strong>
+                    <ShoppingCartOutlined /> <strong title={record.basket_name}>{record.basket_name}</strong>
                     <span> багцын захиалгууд</span>
                 </div>
-                <Tag bordered={false}>{record.count} захиалга</Tag>
+                <div className="basket-items-search-toolbar" onClick={(event) => event.stopPropagation()}>
+                <Input
+                    size="small"
+                    allowClear
+                    prefix={<SearchOutlined />}
+                    placeholder="Нэр, код, марк, брэнд, захиалагчаар хайх"
+                    aria-label={`${record.basket_name} багцын захиалга хайх`}
+                    value={search}
+                    onChange={(event) => setBasketSearches((previous) => ({
+                        ...previous, [record.key]: event.target.value,
+                    }))}
+                />
+                <Text type="secondary">{filteredItems.length} / {record.count} захиалга</Text>
+                </div>
             </div>
             <Table
                 className="basket-items-detail-table"
                 columns={itemColumns}
-                dataSource={record.bundled_items}
+                dataSource={filteredItems}
+                locale={{ emptyText: "Хайлтад тохирох захиалга олдсонгүй" }}
                 expandable={mode === "geree" ? undefined : {
                     rowExpandable: (item) => item.source_count > 1,
                     expandedRowRender: (item) => (
@@ -467,10 +515,11 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
                 }}
                 pagination={false}
                 size="small"
-                scroll={{ x: 1200 }}
+                scroll={{ x: 1200, y: itemScrollY }}
             />
         </div>
-    );
+        );
+    };
 
     return (
         <div className="basket-items-workspace">
@@ -524,6 +573,14 @@ const BasketItemsDetails = ({ basketIds, mode }) => {
             />
         </div>
     );
+};
+
+BasketItemsDetails.propTypes = {
+    basketIds: PropTypes.oneOfType([PropTypes.string, PropTypes.array]),
+    mode: PropTypes.string,
+    includeReturned: PropTypes.bool,
+    onArrivalProgressChange: PropTypes.func,
+    itemScrollY: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 
 export default BasketItemsDetails;

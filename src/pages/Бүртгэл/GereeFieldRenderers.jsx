@@ -12,15 +12,40 @@ const currencyOptions = [
   { label: "₽ RUB", value: "RUB" },
 ];
 
-export const calcCompletion = (record) => {
-  const fields = Object.keys(record).filter(
-    (f) => !["GereeId", "TenderId", "CreatedAt"].includes(f)
-  );
-  let filled = 0;
-  fields.forEach((f) => {
-    if (record[f] && record[f] !== "0") filled++;
-  });
-  return Math.round((filled / fields.length) * 100);
+export const completionFields = [
+  "гэрээний_дугаар",
+  "ААН_регистер",
+  "бэлтгэн_нийлүүлэгч_ААН",
+  "гэрээ_байгуулсан_ААН",
+  "гэрээ_байгуулсан_огноо",
+  "гэрээний_дүн",
+  "төлбөрийн_нөхцөл",
+  "төлбөрийн_огноо",
+  "нийлүүлэх_нөхцөл",
+  "нийлүүлэх_хугацаа",
+];
+
+const hasCompletionValue = (value) => {
+  if (value === null || value === undefined || value === false) return false;
+  if (typeof value === "number") return Number.isFinite(value) && value > 0;
+
+  const normalized = String(value).trim();
+  return normalized !== ""
+    && normalized !== "0"
+    && normalized.toLowerCase() !== "null"
+    && !normalized.startsWith("1900-01-01");
+};
+
+export const calcCompletion = (record = {}, arrivalPercent = null) => {
+  const filled = completionFields.filter((field) => hasCompletionValue(record[field])).length;
+  const hasArrivalProgress = arrivalPercent !== null
+    && arrivalPercent !== undefined
+    && Number.isFinite(Number(arrivalPercent));
+  const arrivalScore = hasArrivalProgress
+    ? Math.min(100, Math.max(0, Number(arrivalPercent))) / 100
+    : 0;
+  const totalCriteria = completionFields.length + (hasArrivalProgress ? 1 : 0);
+  return Math.round(((filled + arrivalScore) / totalCriteria) * 100);
 };
 
 export const ProgressAction = ({ record }) => {
@@ -44,7 +69,7 @@ export const fieldLabels = {
   төлбөрийн_огноо: "Төлбөрийн огноо",
   төлбөр_хийх_хугацаа: "Төлбөр хийх хугацаа",
   нийлүүлэх_нөхцөл: "Нийлүүлэх нөхцөл",
-  нийлүүлэх_хугацаа: "Нийлүүлэх хугацаа",
+  нийлүүлэх_хугацаа: "Нийлүүлэх хугацаа (хоног)",
   алдангийн_нөхцөл: "Алдангийн нөхцөл",
   гэрээ_хэрэгжилтийн_явц: "Гэрээ хэрэгжилтийн явц",
   тодруулга: "Тодруулга",

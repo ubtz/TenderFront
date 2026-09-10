@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Button,
   Card,
   DatePicker,
   Descriptions,
   Form,
   Input,
+  InputNumber,
   Modal,
   Progress,
   Select,
   Space,
+  Spin,
   Tabs,
   Tag,
   Tooltip,
@@ -31,14 +34,18 @@ import {
   SafetyCertificateOutlined,
   ShoppingCartOutlined,
 } from "@ant-design/icons";
+import axios from "axios";
 import dayjs from "dayjs";
+import PropTypes from "prop-types";
 import BasketItemsDetails from "../Бүртгэл/BasketItemsDetails";
 import ContractCreateModal from "./ContractCreateModal";
 import TenderReannounceModal from "./TenderReannounceModal";
 import { fieldLabels, generalFieldOrder } from "./tender.fields";
 import { calcCompletion, isEmpty } from "./tender.utils";
+import { formatBudgetAmount, parseBudgetAmount } from "./tender.money";
 
 const { Text } = Typography;
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 const EXCLUDED_FIELDS = [
   "tender_id", "created_at", "created_by", "тендер_амжилттай_болсон_эсэх",
@@ -46,6 +53,8 @@ const EXCLUDED_FIELDS = [
   "урилгийн_дугаар", "урилгийн_огноо", "гомдол_гаргасан_огноо",
   "түтгэлзүүлсэн_огноо", "ү_дарга", "ү_гишүүд", "ү_дугаар", "ү_огноо",
   "зүк_дугаар", "зүк_огноо", "basket_ids", "Ovog", "Ner", "root_tender_id",
+  "version_no", "is_current", "lifecycle_status", "archived_at",
+  "has_returned_contract", "returned_contract_comment", "returned_contract_at", "returned_contract_by",
 ];
 
 const NIIGEMLEG_FIELDS = ["ү_дугаар", "ү_огноо"];
@@ -55,12 +64,6 @@ const LIMITED_FIELDS = [
   "батлагдсан_төсөвт_өртөг",
   "гэрээ_байгуулах_эрх_олгосон_огноо",
   "тайлбар",
-];
-
-const versions = [
-  { id: "v1", label: "v1.0" },
-  { id: "v2", label: "v2.0" },
-  { id: "Одоо", label: "Одоо" },
 ];
 
 const normalizeRecordForForm = (record) => {
@@ -94,18 +97,26 @@ const TenderModal = ({
   onActivate,
   onDelete,
   hasContract,
+  existingContract,
   onContractCreated,
   onReannounced,
 }) => {
   const [form] = Form.useForm();
   const [activeTab, setActiveTab] = useState("general");
-  const [activeVersion, setActiveVersion] = useState("v2");
+  const [versionHistory, setVersionHistory] = useState([]);
+  const [selectedVersionId, setSelectedVersionId] = useState(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [contractModalOpen, setContractModalOpen] = useState(false);
   const [reannounceModalOpen, setReannounceModalOpen] = useState(false);
   const [orderEditorOpen, setOrderEditorOpen] = useState(false);
   const [fieldOrder, setFieldOrder] = useState(() => [...generalFieldOrder]);
   const [draftFieldOrder, setDraftFieldOrder] = useState(() => [...generalFieldOrder]);
   const [draggedField, setDraggedField] = useState(null);
+  const activeRecord = useMemo(
+    () => versionHistory.find((version) => Number(version.tender_id) === Number(selectedVersionId)) || record,
+    [record, selectedVersionId, versionHistory]
+  );
+  const isHistoricalView = Number(activeRecord?.tender_id) !== Number(record?.tender_id);
 
   const fieldOrderStorageKey = useMemo(() => {
     const userIdentity = user?.id || user?.Id || user?.username || user?.Username || "default";
@@ -113,21 +124,59 @@ const TenderModal = ({
   }, [user]);
 
   const isManagement = user?.erh === "Удирдлага" || user?.Erh === "Удирдлага";
-  const tenderType = record?.тендерийн_төрөл?.trim();
-  const ownerName = `${record?.Ovog || ""} ${record?.Ner || ""}`.trim() || "Хариуцагчгүй";
+  const tenderType = activeRecord?.тендерийн_төрөл?.trim();
+  const ownerName = `${activeRecord?.Ovog || ""} ${activeRecord?.Ner || ""}`.trim() || "Хариуцагчгүй";
   const isEvaluationCommittee = ["НТШ", "ХА"].includes(tenderType);
   const completionMode = isEvaluationCommittee ? "default" : "zuk";
-  const isSuspended = !String(record?.түтгэлзүүлсэн_огноо || "").startsWith("1900");
+  const isSuspended = !String(activeRecord?.түтгэлзүүлсэн_огноо || "").startsWith("1900");
+  const isWaitingExternal = activeRecord?.lifecycle_status === "WaitingExternal";
+  const showReturnedContract = !isHistoricalView && Boolean(record?.has_returned_contract);
+  const contractSpecialistName = String(
+    existingContract?.geree_user_name || ""
+  ).trim();
   const completion = useMemo(
-    () => calcCompletion(record, completionMode),
-    [completionMode, record]
+    () => calcCompletion(activeRecord, completionMode),
+    [activeRecord, completionMode]
   );
 
   useEffect(() => {
-    if (!record) return;
-    form.setFieldsValue(normalizeRecordForForm(record));
-    setActiveTab("general");
-  }, [form, record]);
+    if (!activeRecord) return;
+    form.setFieldsValue(normalizeRecordForForm(activeRecord));
+  }, [activeRecord, form]);
+
+  useEffect(() => {
+    if (visible && record?.tender_id) setActiveTab("general");
+  }, [record?.tender_id, visible]);
+
+  useEffect(() => {
+    if (!visible || !record?.tender_id) return;
+    let cancelled = false;
+    setVersionsLoading(true);
+    axios.get(`${API_BASE_URL}/get/GetTenderChainById/${record.tender_id}`)
+      .then((response) => {
+        if (cancelled) return;
+        const versions = Array.isArray(response.data) && response.data.length
+          ? response.data
+          : [record];
+        setVersionHistory(versions);
+        const selected = versions.find((version) => Number(version.tender_id) === Number(record.tender_id))
+          || versions.find((version) => version.is_current)
+          || versions[versions.length - 1];
+        setSelectedVersionId(selected?.tender_id ?? record.tender_id);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Tender version history fetch failed:", error);
+        setVersionHistory([record]);
+        setSelectedVersionId(record.tender_id);
+      })
+      .finally(() => {
+        if (!cancelled) setVersionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [record, visible]);
 
   useEffect(() => {
     try {
@@ -145,16 +194,16 @@ const TenderModal = ({
   }, [fieldOrderStorageKey]);
 
   const visibleFields = useMemo(() => {
-    if (!record) return [];
+    if (!activeRecord) return [];
     const fields = isEvaluationCommittee
-      ? Object.keys(record).filter((field) => !EXCLUDED_FIELDS.includes(field))
+      ? Object.keys(activeRecord).filter((field) => !EXCLUDED_FIELDS.includes(field))
       : LIMITED_FIELDS;
     const order = new Map(fieldOrder.map((field, index) => [field, index]));
     return [...fields].sort((first, second) =>
       (order.get(first) ?? Number.MAX_SAFE_INTEGER) -
       (order.get(second) ?? Number.MAX_SAFE_INTEGER)
     );
-  }, [fieldOrder, isEvaluationCommittee, record]);
+  }, [activeRecord, fieldOrder, isEvaluationCommittee]);
 
   const openOrderEditor = () => {
     setDraftFieldOrder([...fieldOrder]);
@@ -191,26 +240,49 @@ const TenderModal = ({
 
   const saveField = (field, value) => {
     const serialized = serializeValue(value);
-    const current = serializeValue(record?.[field]);
+    const current = serializeValue(activeRecord?.[field]);
     if (String(serialized) === String(current)) return;
-    handleUpdate(record.tender_id, field, serialized);
+    handleUpdate(activeRecord.tender_id, field, serialized);
   };
 
   const renderReadOnly = (field) => {
-    const value = record?.[field];
+    const value = activeRecord?.[field];
     if (isEmpty(value)) return <Text type="secondary">—</Text>;
     if (field.includes("огноо")) {
       const date = dayjs(value);
       return date.isValid() ? date.format("YYYY-MM-DD") : value;
     }
     if (field === "батлагдсан_төсөвт_өртөг") {
-      return `${Number(value).toLocaleString()} ₮`;
+      return `${formatBudgetAmount(value)} ₮`;
     }
     return String(value);
   };
 
   const renderField = (field) => {
-    if (isManagement) return renderReadOnly(field);
+    if (isManagement || isHistoricalView || isWaitingExternal) return renderReadOnly(field);
+
+    if (field === "батлагдсан_төсөвт_өртөг") {
+      return (
+        <Form.Item name={field} noStyle>
+          <InputNumber
+            stringMode
+            min="0"
+            max="99999999999999999.99"
+            precision={2}
+            controls={false}
+            style={{ width: "100%" }}
+            formatter={(value, info) => formatBudgetAmount(info.userTyping ? info.input : value)}
+            parser={parseBudgetAmount}
+            addonAfter="₮"
+            onBlur={() => saveField(field, form.getFieldValue(field) ?? "0")}
+            onPressEnter={(event) => {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }}
+          />
+        </Form.Item>
+      );
+    }
 
     if (field === "тендерийн_төрөл") {
       return (
@@ -267,7 +339,7 @@ const TenderModal = ({
     );
   };
 
-  if (!record) return null;
+  if (!activeRecord) return null;
 
   const detailList = (fields, className = "") => (
     <Descriptions bordered column={1} size="small" className={className}>
@@ -315,14 +387,29 @@ const TenderModal = ({
     {
       key: "items",
       label: <span><ShoppingCartOutlined /> Захиалга</span>,
-      children: <BasketItemsDetails basketIds={record.basket_ids} versionId={activeVersion} />,
+      children: (
+        <BasketItemsDetails
+          key={activeRecord.tender_id}
+          basketIds={activeRecord.basket_ids}
+          includeReturned={isHistoricalView}
+          itemScrollY="min(420px, 45vh)"
+        />
+      ),
     },
   ];
 
-  const contractDisabledReason = isSuspended
+  const contractDisabledReason = isWaitingExternal
+    ? "Дахин зарласан тендер гадаад системийн мэдээлэл хүлээж байна"
+    : isHistoricalView
+    ? "Түүхэн хувилбар дээр үйлдэл хийх боломжгүй"
+    : isSuspended
     ? "Түдгэлзүүлсэн тендерт гэрээ үүсгэх боломжгүй"
     : hasContract
-      ? "Энэ тендерт гэрээ аль хэдийн үүссэн"
+      ? `Энэ тендерт гэрээ аль хэдийн үүссэн${
+          contractSpecialistName
+            ? ` · Гэрээний мэргэжилтэн: ${contractSpecialistName}`
+            : ""
+        }`
     : completion < 100
       ? "Тендерийн мэдээллийг 100% бүрдүүлсний дараа гэрээ үүсгэнэ"
       : isManagement
@@ -347,21 +434,27 @@ const TenderModal = ({
             </div>
             <div>
               <div className="tender-modal-eyebrow">Тендерийн ажлын талбар</div>
-              <h2 className="tender-modal-title">{record.tender_name || "Тендерийн дэлгэрэнгүй"}</h2>
+              <h2 className="tender-modal-title">{activeRecord.tender_name || "Тендерийн дэлгэрэнгүй"}</h2>
               <div className="tender-modal-meta">
-                <Tag color="blue">№ {record.тендерийн_дугаар || "Дугааргүй"}</Tag>
+                <Tag color="blue">№ {activeRecord.тендерийн_дугаар || "Дугааргүй"}</Tag>
                 <Tag>{tenderType || "Төрөлгүй"}</Tag>
-                <Tag color={isSuspended ? "warning" : "success"}>
-                  {isSuspended ? "Түдгэлзүүлсэн" : "Идэвхтэй"}
+                <Tag color={isWaitingExternal ? "gold" : isHistoricalView ? "default" : "processing"}>
+                  v{activeRecord.version_no || 1}.0 {isWaitingExternal ? "· Хүлээгдэж буй" : isHistoricalView ? "· Түүх" : "· Одоо"}
+                </Tag>
+                <Tag color={isWaitingExternal ? "gold" : isSuspended ? "warning" : "success"}>
+                  {isWaitingExternal ? "Дахин зарласан" : isSuspended ? "Түдгэлзүүлсэн" : "Идэвхтэй"}
                 </Tag>
                 {hasContract && <Tag icon={<CheckCircleOutlined />} color="success">Гэрээ үүссэн</Tag>}
+                {showReturnedContract && !hasContract && (
+                  <Tag icon={<ReloadOutlined />} color="warning">Гэрээнээс буцаасан</Tag>
+                )}
               </div>
             </div>
           </div>
           <div className="tender-modal-header__context">
             <div className="tender-modal-context-item">
               <span><ApartmentOutlined /> Байгууллага</span>
-              <strong>{record.Organization || "Тодорхойгүй"}</strong>
+              <strong>{activeRecord.Organization || "Тодорхойгүй"}</strong>
             </div>
             <div className="tender-modal-context-item">
               <span><SafetyCertificateOutlined /> Хариуцсан ажилтан</span>
@@ -377,6 +470,27 @@ const TenderModal = ({
             <Text type="secondary">Гэрээ үүсгэхэд 100% шаардлагатай</Text>
           </div>
         </div>
+
+        {showReturnedContract && !hasContract && (
+          <div className="tender-contract-return-alert">
+            <Alert
+              type="warning"
+              showIcon
+              message="Гэрээний мэргэжилтнээс буцаасан"
+              description={(
+                <div>
+                  <strong>{record.returned_contract_comment || "Тайлбар оруулаагүй"}</strong>
+                  <span>
+                    {record.returned_contract_by || "Тодорхойгүй мэргэжилтэн"}
+                    {record.returned_contract_at && dayjs(record.returned_contract_at).isValid()
+                      ? ` · ${dayjs(record.returned_contract_at).format("YYYY.MM.DD HH:mm")}`
+                      : ""}
+                  </span>
+                </div>
+              )}
+            />
+          </div>
+        )}
 
         <div className="tender-modal-body">
           <main className="tender-workspace-main">
@@ -405,8 +519,12 @@ const TenderModal = ({
               </Tooltip>
               {!isManagement && (
                 <Tooltip
-                  title={isSuspended
+                  title={isWaitingExternal
+                    ? "Гадаад системийн мэдээлэл ирэхийг хүлээж байна"
+                    : isSuspended
                     ? "Түдгэлзүүлсэн тендерийг дахин зарлах боломжгүй"
+                    : isHistoricalView
+                      ? "Түүхэн хувилбарыг дахин зарлах боломжгүй"
                     : hasContract
                       ? "Гэрээ үүссэн тендерийг дахин зарлах боломжгүй"
                       : ""}
@@ -416,7 +534,7 @@ const TenderModal = ({
                     <Button
                       block
                       icon={<ReloadOutlined />}
-                      disabled={hasContract || isSuspended}
+                      disabled={hasContract || isSuspended || isHistoricalView || isWaitingExternal}
                       onClick={() => setReannounceModalOpen(true)}
                     >
                       Тендер дахин зарлах
@@ -430,6 +548,7 @@ const TenderModal = ({
                     block
                     type="primary"
                     icon={<CheckCircleOutlined />}
+                    disabled={isHistoricalView || isWaitingExternal}
                     onClick={() => {
                       Modal.confirm({
                         title: "Тендерийг идэвхтэй болгох уу?",
@@ -447,6 +566,7 @@ const TenderModal = ({
                     block
                     danger
                     icon={<PauseCircleOutlined />}
+                    disabled={isHistoricalView || isWaitingExternal}
                     onClick={() => onSuspend(record)}
                   >
                     Түдгэлзүүлэх
@@ -454,7 +574,13 @@ const TenderModal = ({
                 )
               )}
               <Tooltip
-                title={hasContract ? "Гэрээ үүссэн тендерийг устгах боломжгүй" : ""}
+                title={isWaitingExternal
+                  ? "Хүлээгдэж буй тендерийг устгах боломжгүй"
+                  : isHistoricalView
+                  ? "Түүхэн хувилбарыг устгах боломжгүй"
+                  : hasContract
+                    ? "Гэрээ үүссэн тендерийг устгах боломжгүй"
+                    : ""}
                 placement="left"
               >
                 <span style={{ width: "100%" }}>
@@ -462,7 +588,7 @@ const TenderModal = ({
                     block
                     danger
                     icon={<DeleteOutlined />}
-                    disabled={hasContract}
+                    disabled={hasContract || isHistoricalView || isWaitingExternal}
                     onClick={() => {
                       Modal.confirm({
                         title: "Тендер устгах уу?",
@@ -485,16 +611,21 @@ const TenderModal = ({
               <HistoryOutlined /> Хувилбарын түүх
             </div>
             <div className="tender-version-list">
-              {versions.map((version) => (
-                <div
-                  key={version.id}
-                  className={`tender-version-item ${activeVersion === version.id ? "active" : ""}`}
-                  onClick={() => setActiveVersion(version.id)}
-                >
-                  <FolderOpenOutlined />
-                  {version.label}
-                </div>
-              ))}
+              {versionsLoading ? (
+                <div className="tender-version-loading"><Spin size="small" /> Уншиж байна...</div>
+              ) : versionHistory.map((version) => (
+                  <button
+                    type="button"
+                    key={version.tender_id}
+                    className={`tender-version-item ${Number(selectedVersionId) === Number(version.tender_id) ? "active" : ""}`}
+                    onClick={() => setSelectedVersionId(version.tender_id)}
+                  >
+                    <FolderOpenOutlined />
+                    <span>v{version.version_no || 1}.0</span>
+                    {version.is_current && <Tag bordered={false} color="processing">Одоо</Tag>}
+                    {version.lifecycle_status === "WaitingExternal" && <Tag bordered={false} color="gold">Хүлээгдэж буй</Tag>}
+                  </button>
+                ))}
             </div>
           </aside>
         </div>
@@ -578,6 +709,21 @@ const TenderModal = ({
       />
     </>
   );
+};
+
+TenderModal.propTypes = {
+  visible: PropTypes.bool.isRequired,
+  record: PropTypes.object,
+  user: PropTypes.object,
+  onClose: PropTypes.func.isRequired,
+  handleUpdate: PropTypes.func.isRequired,
+  onSuspend: PropTypes.func.isRequired,
+  onActivate: PropTypes.func.isRequired,
+  onDelete: PropTypes.func.isRequired,
+  hasContract: PropTypes.bool,
+  existingContract: PropTypes.object,
+  onContractCreated: PropTypes.func.isRequired,
+  onReannounced: PropTypes.func,
 };
 
 export default TenderModal;

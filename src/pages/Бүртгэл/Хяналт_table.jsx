@@ -113,6 +113,7 @@ function ХяналтTable() {
                             key: `plan-${planGroup.plan_root_number}`,
                             index: index + 1,
                             plan_root_number: planGroup.plan_root_number,
+                            user_id: planGroup.user_id,
                             plan_name: planGroup.plan_name,
                             baskets,
                             total_price: planTotal,
@@ -264,7 +265,7 @@ function ХяналтTable() {
                 return (
                     <Space size="small">
 
-                        <PrintIcon normData={row} planId={row.plan_root_number} />
+                        <PrintIcon normData={row} planId={row.plan_root_number} UserId={row.user_id} />
 
                     </Space>
                 );

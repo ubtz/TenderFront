@@ -9,19 +9,19 @@ export const calcCompletion = (record, mode = "default") => {
   if (!record) return 0;
 
   if (mode === "default") {
-    const excluded = [
-      "tender_id",
-      "created_at",
-      "created_by",
-      "түтгэлзүүлсэн_огноо",
-      "basket_ids",
-      "Ovog",
-      "Ner",
+    const fields = [
+      "шалгаруулалтын_төрөл",
+      "тендерийн_төрөл",
+      "Organization",
+      "батлагдсан_төсөвт_өртөг",
+      "тендер_нээх_огноо",
+      "тендер_хаах_огноо",
+      "үнэлгээ_хийсэн_огноо",
+      "мэдэгдэл_тараасан_огноо",
+      "гэрээ_байгуулах_эрх_олгосон_огноо",
+      "тендерийн_явц_шалтгаан",
+      "тайлбар",
     ];
-
-    const fields = Object.keys(record).filter(
-      (k) => !excluded.includes(k)
-    );
 
     const filled = fields.filter((f) => !isEmpty(record[f])).length;
     return fields.length

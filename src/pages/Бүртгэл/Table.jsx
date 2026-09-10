@@ -75,6 +75,7 @@ const GroupedTable = ({
   selectionResetToken,
   selectable = true,
   showOwner = true,
+  showReturnComment = false,
 }) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [expandedPackageKeys, setExpandedPackageKeys] = useState([]);
@@ -129,6 +130,10 @@ const GroupedTable = ({
       const destinationBasketNames = [
         ...new Set(items.map((item) => item.destinationBasketName).filter(Boolean)),
       ];
+      const returnComments = [
+        ...new Set(items.map((item) => normalize(item.tailbar)).filter(Boolean)),
+      ];
+      const isCancelled = items.some((item) => item.isCancelled);
 
       const packageKey = `pkg-${pkgno || "none"}-${pkgdate || "no-date"}`;
       return {
@@ -145,6 +150,8 @@ const GroupedTable = ({
         isLocked: items.some((item) => item.isLocked),
         claimedBy,
         destinationBasketNames,
+        returnComments,
+        isCancelled,
         items: items.map((item, index) => ({
           ...item,
           calculatedPriceSum: calculateOrderTotal(item),
@@ -518,6 +525,25 @@ const GroupedTable = ({
         </Tooltip>
       ) : null,
     },
+    ...(showReturnComment ? [{
+      title: "Буцаасан тайлбар",
+      key: "returnComment",
+      width: 300,
+      render: (_, record) => record.returnComments.length ? (
+        <Space direction="vertical" size={3}>
+          <Tag color={record.isCancelled ? "error" : "warning"}>
+            {record.isCancelled ? "Цуцалсан" : "Буцаасан"}
+          </Tag>
+          {record.returnComments.map((comment) => (
+            <Text key={comment} style={{ whiteSpace: "normal" }}>
+              {comment}
+            </Text>
+          ))}
+        </Space>
+      ) : (
+        <Text type="secondary">Тайлбаргүй</Text>
+      ),
+    }] : []),
     {
       title: "Үйлдэл",
       key: "actions",
@@ -732,6 +758,7 @@ GroupedTable.propTypes = {
   selectionResetToken: PropTypes.number,
   selectable: PropTypes.bool,
   showOwner: PropTypes.bool,
+  showReturnComment: PropTypes.bool,
 };
 
 export default GroupedTable;

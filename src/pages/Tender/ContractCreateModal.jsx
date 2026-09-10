@@ -2,11 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, message } from "antd";
 import axios from "axios";
 import dayjs from "dayjs";
+import PropTypes from "prop-types";
 
 const getErrorMessage = (error) =>
   error?.response?.data?.error ||
   error?.response?.data?.message ||
   "Гэрээ үүсгэхэд алдаа гарлаа";
+
+const formatContractAmount = (value) => {
+  const [integerPart, decimalPart] = String(value ?? "").replace(/'/g, "").split(".");
+  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, "'");
+  return decimalPart === undefined ? formattedInteger : `${formattedInteger}.${decimalPart}`;
+};
+
+const parseContractAmount = (value) => String(value ?? "").replace(/'/g, "");
 
 const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
   const API_BASE_URL = import.meta.env.VITE_API_URL;
@@ -30,7 +39,6 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
 
     form.setFieldsValue({
       organization: organizations[0],
-      contractNumber: `GR-${Date.now()}`,
       contractDate: dayjs(),
       amount: Number(tender["батлагдсан_төсөвт_өртөг"]) || 0,
       currency: "MNT",
@@ -94,11 +102,10 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
 
       const payload = {
         TenderId: tender.tender_id,
-        Гэрээний_дугаар: values.contractNumber.trim(),
         Гэрээ_байгуулсан_огноо: values.contractDate.toISOString(),
         Гэрээ_байгуулсан_ААН: values.organization,
-        Бэлтгэн_нийлүүлэгч_ААН: values.supplierName.trim(),
-        ААН_регистер: values.companyRegister.trim(),
+        Бэлтгэн_нийлүүлэгч_ААН: String(values.supplierName || "").trim(),
+        ААН_регистер: String(values.companyRegister || "").trim(),
         Хүчинтэй_хугацаа: tender.Хүчинтэй_хугацаа || "",
         Валют: values.currency,
         Гэрээний_дүн: Number(values.amount) || 0,
@@ -180,9 +187,8 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
 
         <Form.Item
           name="companyRegister"
-          label="ААН регистер"
+          label="ААН регистер (сонголттой)"
           rules={[
-            { required: true, whitespace: true, message: "ААН регистер оруулна уу" },
             { max: 30, message: "ААН регистер 30 тэмдэгтээс урт байж болохгүй" },
           ]}
         >
@@ -210,9 +216,8 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
         <Form.Item
           name="supplierName"
           label="Бэлтгэн нийлүүлэгч ААН"
-          rules={[{ required: true, whitespace: true, message: "ААН регистрээр хайж баталгаажуулна уу" }]}
         >
-          <Input readOnly placeholder="ААН регистрээр хайхад автоматаар бөглөгдөнө" />
+          <Input readOnly placeholder="Одоо хайх эсвэл гэрээний бүртгэлээс дараа бөглөнө" />
         </Form.Item>
 
         <Form.Item
@@ -229,13 +234,6 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
 
         <div className="tender-contract-grid">
           <Form.Item
-            name="contractNumber"
-            label="Гэрээний дугаар"
-            rules={[{ required: true, message: "Гэрээний дугаар оруулна уу" }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
             name="contractDate"
             label="Гэрээ байгуулсан огноо"
             rules={[{ required: true, message: "Огноо сонгоно уу" }]}
@@ -243,15 +241,39 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item name="amount" label="Гэрээний дүн">
-            <InputNumber min={0} controls={false} style={{ width: "100%" }} />
+            <InputNumber
+              stringMode
+              min="0"
+              precision={2}
+              controls={false}
+              style={{ width: "100%" }}
+              formatter={formatContractAmount}
+              parser={parseContractAmount}
+            />
           </Form.Item>
-          <Form.Item name="currency" label="Валют">
-            <Select options={[{ value: "MNT", label: "MNT" }]} />
+          <Form.Item name="currency" label="Валют (сонголттой)">
+            <Select
+              allowClear
+              placeholder="Валют сонгох"
+              options={[
+                { value: "MNT", label: "MNT — Төгрөг" },
+                { value: "USD", label: "USD — Ам.доллар" },
+                { value: "RUB", label: "RUB — Рубль" },
+                { value: "CNY", label: "CNY — Юань" },
+              ]}
+            />
           </Form.Item>
         </div>
       </Form>
     </Modal>
   );
+};
+
+ContractCreateModal.propTypes = {
+  open: PropTypes.bool.isRequired,
+  tender: PropTypes.object,
+  onCancel: PropTypes.func.isRequired,
+  onCreated: PropTypes.func.isRequired,
 };
 
 export default ContractCreateModal;

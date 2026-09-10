@@ -1,13 +1,15 @@
-import { Progress, Table, Tag, Typography } from "antd";
-import { CheckCircleOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Progress, Table, Tag, Tooltip, Typography } from "antd";
+import { CheckCircleOutlined, FileTextOutlined, RollbackOutlined } from "@ant-design/icons";
+import PropTypes from "prop-types";
 import { calcCompletion } from "./tender.utils";
+import { formatBudgetAmount } from "./tender.money";
 
 const { Text } = Typography;
 
 const getCompletionMode = (record) =>
   ["НТШ", "ХА"].includes(record?.тендерийн_төрөл?.trim()) ? "default" : "zuk";
 
-const TenderTable = ({ data, loading, onRowClick, contractTenderIds }) => {
+const TenderTable = ({ data, loading, onRowClick, contractTenderIds, contractsByTenderId }) => {
   const columns = [
     {
       title: "Тендер",
@@ -48,7 +50,7 @@ const TenderTable = ({ data, loading, onRowClick, contractTenderIds }) => {
       dataIndex: "батлагдсан_төсөвт_өртөг",
       width: 160,
       align: "right",
-      render: (value) => `${Number(value || 0).toLocaleString()} ₮`,
+      render: (value) => `${formatBudgetAmount(value || 0)} ₮`,
       sorter: (a, b) =>
         Number(a.батлагдсан_төсөвт_өртөг || 0) - Number(b.батлагдсан_төсөвт_өртөг || 0),
     },
@@ -66,14 +68,46 @@ const TenderTable = ({ data, loading, onRowClick, contractTenderIds }) => {
     {
       title: "Гэрээ",
       key: "contract",
-      width: 130,
+      width: 230,
       align: "center",
-      render: (_, record) =>
-        contractTenderIds.has(Number(record.tender_id)) ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">Үүссэн</Tag>
-        ) : (
-          <Tag icon={<FileTextOutlined />}>Үүсээгүй</Tag>
-        ),
+      render: (_, record) => {
+        const tenderId = Number(record.tender_id);
+        if (!contractTenderIds.has(tenderId)) {
+          if (record.has_returned_contract) {
+            const returnComment = String(record.returned_contract_comment || "").trim();
+            return (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <Tag icon={<RollbackOutlined />} color="warning">Гэрээнээс буцаасан</Tag>
+                {record.returned_contract_by && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>{record.returned_contract_by}</Text>
+                )}
+                {returnComment && (
+                  <Tooltip title={returnComment}>
+                    <Text ellipsis style={{ width: 190, fontSize: 12, color: "#9a5b32" }}>
+                      {returnComment}
+                    </Text>
+                  </Tooltip>
+                )}
+              </div>
+            );
+          }
+          return <Tag icon={<FileTextOutlined />}>Үүсээгүй</Tag>;
+        }
+
+        const specialistName = String(
+          contractsByTenderId.get(tenderId)?.geree_user_name || ""
+        ).trim();
+        return (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <Tag icon={<CheckCircleOutlined />} color="success">Үүссэн</Tag>
+            {specialistName && (
+              <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.25 }}>
+                {specialistName}
+              </Text>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -92,6 +126,14 @@ const TenderTable = ({ data, loading, onRowClick, contractTenderIds }) => {
       })}
     />
   );
+};
+
+TenderTable.propTypes = {
+  data: PropTypes.arrayOf(PropTypes.object).isRequired,
+  loading: PropTypes.bool.isRequired,
+  onRowClick: PropTypes.func.isRequired,
+  contractTenderIds: PropTypes.instanceOf(Set).isRequired,
+  contractsByTenderId: PropTypes.instanceOf(Map).isRequired,
 };
 
 export default TenderTable;

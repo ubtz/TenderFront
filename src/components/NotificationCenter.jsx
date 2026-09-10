@@ -24,6 +24,7 @@ const notificationTypeLabel = {
   order_returned: "Буцаалт",
   tender_created: "Тендер",
   contract_assigned: "Гэрээ",
+  contract_returned: "Гэрээний буцаалт",
   tender_suspended: "Түдгэлзүүлсэн",
   due_warning: "Хугацаа",
 };

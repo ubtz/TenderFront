@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, DatePicker, Input, Segmented, message } from "antd";
-import { PauseCircleOutlined, SearchOutlined, UnorderedListOutlined } from "@ant-design/icons";
+import { ClockCircleOutlined, PauseCircleOutlined, SearchOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import axios from "axios";
 import dayjs from "dayjs";
 import { getStoredUser } from "../../api/session";
@@ -11,6 +11,7 @@ import "./Tender.css";
 
 const isSuspended = (tender) =>
   !String(tender?.түтгэлзүүлсэн_огноо || "").startsWith("1900");
+const isWaitingExternal = (tender) => tender?.lifecycle_status === "WaitingExternal";
 const { RangePicker } = DatePicker;
 const tenderYears = ["2025", "2026", "2027"];
 
@@ -19,6 +20,7 @@ const Tender = () => {
   const user = getStoredUser() || {};
   const [tenders, setTenders] = useState([]);
   const [contractTenderIds, setContractTenderIds] = useState(new Set());
+  const [contractsByTenderId, setContractsByTenderId] = useState(new Map());
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState("normal");
   const [activeYear, setActiveYear] = useState("all");
@@ -50,12 +52,14 @@ const Tender = () => {
       setTenders(accessibleTenders);
 
       if (contractResult.status === "fulfilled") {
+        const contracts = Array.isArray(contractResult.value.data) ? contractResult.value.data : [];
         setContractTenderIds(
           new Set(
-            (Array.isArray(contractResult.value.data) ? contractResult.value.data : []).map(
-              (contract) => Number(contract.TenderId)
-            )
+            contracts.map((contract) => Number(contract.TenderId))
           )
+        );
+        setContractsByTenderId(
+          new Map(contracts.map((contract) => [Number(contract.TenderId), contract]))
         );
       }
     } catch (error) {
@@ -72,8 +76,9 @@ const Tender = () => {
 
   const counts = useMemo(
     () => ({
-      normal: tenders.filter((tender) => !isSuspended(tender)).length,
-      suspended: tenders.filter(isSuspended).length,
+      normal: tenders.filter((tender) => !isWaitingExternal(tender) && !isSuspended(tender)).length,
+      suspended: tenders.filter((tender) => !isWaitingExternal(tender) && isSuspended(tender)).length,
+      waiting: tenders.filter(isWaitingExternal).length,
     }),
     [tenders]
   );
@@ -81,7 +86,12 @@ const Tender = () => {
   const filteredTenders = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("mn-MN");
     return tenders.filter((tender) => {
-      if ((filterType === "suspended") !== isSuspended(tender)) return false;
+      const matchesStatus = filterType === "waiting"
+        ? isWaitingExternal(tender)
+        : filterType === "suspended"
+          ? !isWaitingExternal(tender) && isSuspended(tender)
+          : !isWaitingExternal(tender) && !isSuspended(tender);
+      if (!matchesStatus) return false;
       const rawDate = tender.тендер_нээх_огноо || tender.created_at;
       const tenderDate = dayjs(rawDate);
       if (activeYear !== "all" && (!tenderDate.isValid() || String(tenderDate.year()) !== activeYear)) {
@@ -104,6 +114,8 @@ const Tender = () => {
         tender.Organization,
         tender.Ovog,
         tender.Ner,
+        tender.returned_contract_comment,
+        tender.returned_contract_by,
       ].some((value) => String(value || "").toLocaleLowerCase("mn-MN").includes(query));
     });
   }, [activeYear, dateRange, filterType, search, tenders]);
@@ -222,6 +234,10 @@ const Tender = () => {
                   value: "suspended",
                   label: <span><PauseCircleOutlined /> Түдгэлзүүлсэн <Badge count={counts.suspended} showZero color="#ad7854" /></span>,
                 },
+                {
+                  value: "waiting",
+                  label: <span><ClockCircleOutlined /> Дахин зарласан · Хүлээгдэж буй <Badge count={counts.waiting} showZero color="#b17a2d" /></span>,
+                },
               ]}
             />
             <Segmented
@@ -242,6 +258,7 @@ const Tender = () => {
           data={filteredTenders}
           loading={loading}
           contractTenderIds={contractTenderIds}
+          contractsByTenderId={contractsByTenderId}
           onRowClick={(record) => {
             setSelectedTender(record);
             setModalVisible(true);
@@ -254,17 +271,19 @@ const Tender = () => {
         record={selectedTender}
         user={user}
         hasContract={contractTenderIds.has(Number(selectedTender?.tender_id))}
+        existingContract={contractsByTenderId.get(Number(selectedTender?.tender_id))}
         onContractCreated={(tenderId) => {
           setContractTenderIds((current) => new Set([...current, Number(tenderId)]));
+          fetchTenders();
         }}
         onSuspend={openSuspendModal}
         onActivate={handleActivate}
         onDelete={handleDelete}
         onReannounced={async (tenderId, result) => {
           if (result?.archived) {
-            setTenders((current) => current.filter((item) => Number(item.tender_id) !== Number(tenderId)));
             setSelectedTender(null);
             setModalVisible(false);
+            setFilterType("waiting");
           }
           await fetchTenders();
         }}
