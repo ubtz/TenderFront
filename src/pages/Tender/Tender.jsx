@@ -53,14 +53,16 @@ const Tender = () => {
 
       if (contractResult.status === "fulfilled") {
         const contracts = Array.isArray(contractResult.value.data) ? contractResult.value.data : [];
+        const groupedContracts = new Map();
+        contracts.forEach((contract) => {
+          const tenderId = Number(contract.TenderId);
+          if (!groupedContracts.has(tenderId)) groupedContracts.set(tenderId, []);
+          groupedContracts.get(tenderId).push(contract);
+        });
         setContractTenderIds(
-          new Set(
-            contracts.map((contract) => Number(contract.TenderId))
-          )
+          new Set(groupedContracts.keys())
         );
-        setContractsByTenderId(
-          new Map(contracts.map((contract) => [Number(contract.TenderId), contract]))
-        );
+        setContractsByTenderId(groupedContracts);
       }
     } catch (error) {
       console.error("Tender fetch failed:", error);
@@ -191,6 +193,28 @@ const Tender = () => {
     }
   };
 
+  const handleResetReannouncement = async (tender) => {
+    try {
+      const response = await axios.delete(
+        `${API_BASE_URL}/delete/TenderReannouncement/${tender.tender_id}`
+      );
+      setSelectedTender(null);
+      setModalVisible(false);
+      setFilterType("normal");
+      await fetchTenders();
+      message.success(
+        response.data?.message || "Хүлээгдэж буй дахин зарлалт цэвэрлэгдлээ"
+      );
+      return true;
+    } catch (error) {
+      console.error("Tender reannouncement reset failed:", error);
+      message.error(
+        error?.response?.data?.error || "Дахин зарлалтын хүлээлтийг цэвэрлэхэд алдаа гарлаа"
+      );
+      throw error;
+    }
+  };
+
   return (
     <div className="tender-page">
       <section className="tender-toolbar">
@@ -271,7 +295,7 @@ const Tender = () => {
         record={selectedTender}
         user={user}
         hasContract={contractTenderIds.has(Number(selectedTender?.tender_id))}
-        existingContract={contractsByTenderId.get(Number(selectedTender?.tender_id))}
+        existingContracts={contractsByTenderId.get(Number(selectedTender?.tender_id)) || []}
         onContractCreated={(tenderId) => {
           setContractTenderIds((current) => new Set([...current, Number(tenderId)]));
           fetchTenders();
@@ -279,6 +303,7 @@ const Tender = () => {
         onSuspend={openSuspendModal}
         onActivate={handleActivate}
         onDelete={handleDelete}
+        onResetReannouncement={handleResetReannouncement}
         onReannounced={async (tenderId, result) => {
           if (result?.archived) {
             setSelectedTender(null);

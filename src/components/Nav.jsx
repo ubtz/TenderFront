@@ -5,17 +5,21 @@ import {
   FileTextOutlined,
   SettingOutlined,
   BarChartOutlined,
+  DatabaseOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import { useNavigate, Link } from "react-router-dom";
 import DirtyContext from "../context/DirtyContext";
 import logo from "../assets/logo4.png";
 import "./styles.css";
-import { getSessionRole } from "../api/session";
+import { getSessionRole, getStoredUser } from "../api/session";
 
 const { Sider } = Layout;
 
 function Nav() {
   const accessType = getSessionRole();
+  const currentUser = getStoredUser();
+  const canViewAdminLogs = Number(currentUser?.id) === 2;
 
   const [collapsed, setCollapsed] = useState(false);
   const [openKeys, setOpenKeys] = useState([]);
@@ -158,6 +162,12 @@ function Nav() {
       children: [
         { key: "profile", label: <Link to="/profile">Профайл тохиргоо</Link> },
         { key: "measure-units", label: <Link to="/Хэмжих-нэгж">Хэмжих нэгж</Link> },
+        ...(canViewAdminLogs
+          ? [
+            { key: "system-logs", icon: <DatabaseOutlined />, label: <Link to="/Системийн-лог">Системийн лог</Link> },
+            { key: "business-audit", icon: <HistoryOutlined />, label: <Link to="/Бизнес-аудит">Бизнес аудит</Link> },
+          ]
+          : []),
       ],
     },
   ];

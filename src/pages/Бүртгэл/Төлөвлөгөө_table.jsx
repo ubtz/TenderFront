@@ -61,6 +61,7 @@ const getDateYear = (value) => normalize(value).match(/^(\d{4})/)?.[1] || "";
 const getItemId = (item) => unwrap(item.basketItemId ?? item.BasketItemId ?? item.basket_item_id ?? item.id);
 const getPackageKey = (item) => `${normalize(item.pkgno)}_${normalize(item.pkgdate)}`;
 const getItemYear = (item) => getDateYear(item.pkgdate || item.ddate || item.deathdate);
+const getPlanKey = (planRootNumber, userId) => `${normalize(planRootNumber)}::${normalize(userId)}`;
 const getConsolidationKey = (item, index = 0) => {
     const code = normalize(item.code);
     return code ? `code:${code}` : `item:${normalize(getItemId(item)) || index}`;
@@ -161,27 +162,38 @@ const ТөлөвлөгөөTable = () => {
             if (usersResult.status === "fulfilled") setUsers(usersResult.value.data || []);
             if (branchesResult.status === "fulfilled") setBranches(branchesResult.value.data || []);
 
-            const planMap = new Map(
-                (plansResult.value.data || []).map((plan) => [
-                    normalize(plan.plan_root_number),
-                    { ...plan, baskets: [...(plan.baskets || [])] },
-                ])
-            );
+            const planMap = new Map();
+            (plansResult.value.data || []).forEach((plan) => {
+                const rootNumber = normalize(plan.plan_root_number);
+                if (!rootNumber) return;
+                const planKey = getPlanKey(rootNumber, plan.user_id);
+                if (!planMap.has(planKey)) {
+                    planMap.set(planKey, { ...plan, baskets: [] });
+                }
+                const targetPlan = planMap.get(planKey);
+                (plan.baskets || []).forEach((basket) => {
+                    const exists = targetPlan.baskets.some(
+                        (entry) => String(entry.basket_id) === String(basket.basket_id)
+                    );
+                    if (!exists) targetPlan.baskets.push(basket);
+                });
+            });
             if (basketsResult.status === "fulfilled") {
                 (basketsResult.value.data || [])
                     .filter((basket) => !basket.is_temp && normalize(basket.basket_type).toUpperCase() !== "TEMP")
                     .forEach((basket) => {
-                        const rootKey = normalize(basket.plan_root_number);
-                        if (!rootKey) return;
-                        if (!planMap.has(rootKey)) {
-                            planMap.set(rootKey, {
+                        const rootNumber = normalize(basket.plan_root_number);
+                        if (!rootNumber) return;
+                        const planKey = getPlanKey(rootNumber, basket.user_id);
+                        if (!planMap.has(planKey)) {
+                            planMap.set(planKey, {
                                 plan_root_number: basket.plan_root_number,
                                 plan_name: basket.plan_name,
                                 user_id: basket.user_id,
                                 baskets: [],
                             });
                         }
-                        const plan = planMap.get(rootKey);
+                        const plan = planMap.get(planKey);
                         const exists = plan.baskets.some((entry) => String(entry.basket_id) === String(basket.basket_id));
                         if (!exists) plan.baskets.push({ ...basket, items: [] });
                     });
@@ -223,7 +235,7 @@ const ТөлөвлөгөөTable = () => {
                         });
 
                     return {
-                        key: `plan-${planGroup.plan_root_number}`,
+                        key: `plan-${getPlanKey(planGroup.plan_root_number, planGroup.user_id)}`,
                         plan_root_number: planGroup.plan_root_number,
                         plan_name: normalize(planGroup.plan_name) || "Нэргүй төлөвлөгөө",
                         user_id: planGroup.user_id,
@@ -424,6 +436,7 @@ const ТөлөвлөгөөTable = () => {
                 total: items.reduce((sum, item) => sum + itemTotal(item), 0),
                 pkgno: [...new Set(items.map((item) => normalize(item.pkgno)).filter(Boolean))].join(", "),
                 pkgname: [...new Set(items.map((item) => normalize(item.pkgname)).filter(Boolean))].join(", "),
+                crbrandname: [...new Set(items.map((item) => normalize(item.crbrandname)).filter(Boolean))].join(", "),
                 dname: [...new Set(items.map((item) => normalize(item.dname)).filter(Boolean))].join(", "),
             };
         });
@@ -1162,6 +1175,14 @@ const ТөлөвлөгөөTable = () => {
                         { title: "Барааны нэр", dataIndex: "cr4name", key: "cr4name", width: 220, ellipsis: true },
                         { title: "Марк", dataIndex: "crmarkname", key: "crmarkname", width: 180, ellipsis: true },
                         {
+                            title: "Брэнд",
+                            dataIndex: "crbrandname",
+                            key: "crbrandname",
+                            width: 160,
+                            ellipsis: true,
+                            render: (value) => value || "-",
+                        },
+                        {
                             title: "Захиалгын багц",
                             key: "pkgname",
                             width: 190,
@@ -1196,7 +1217,7 @@ const ТөлөвлөгөөTable = () => {
                         selections: [Table.SELECTION_ALL, Table.SELECTION_NONE],
                     }}
                     pagination={{ pageSize: 8, showSizeChanger: false }}
-                    scroll={{ x: 1020, y: 390 }}
+                    scroll={{ x: 1180, y: 390 }}
                     size="small"
                     rowClassName={(record) => combinableItemIds.has(String(getItemId(record))) ? "combinable-order-row" : ""}
                 />

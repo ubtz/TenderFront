@@ -408,16 +408,22 @@ const Багцлах = () => {
                     .filter((result) => result.status === "fulfilled")
                     .map((result) => result.value)
             );
-            const failedPackageReasons = packageResults
+            const failedPackageDetails = packageResults
                 .filter((result) => result.status === "rejected")
-                .map((result) =>
-                    result.reason?.response?.data?.message ||
-                    result.reason?.response?.data?.error ||
-                    result.reason?.message ||
-                    "Тодорхойгүй алдаа"
-                );
-            if (failedPackageReasons.length) {
-                console.error("Orders back API failures:", failedPackageReasons);
+                .map((result) => ({
+                    url: result.reason?.config?.url || result.reason?.requestLog?.url || "",
+                    status: result.reason?.response?.status,
+                    pkgNo: result.reason?.requestLog?.pkgNo || "",
+                    pkgDate: result.reason?.requestLog?.pkgDate || "",
+                    reason:
+                        result.reason?.response?.data?.message ||
+                        result.reason?.response?.data?.error ||
+                        result.reason?.message ||
+                        "Тодорхойгүй алдаа",
+                }));
+            const failedPackageReasons = failedPackageDetails.map((failure) => failure.reason);
+            if (failedPackageDetails.length) {
+                console.error("Orders back API failures:", failedPackageDetails);
             }
             const returnedRows = rowsToReturn.filter((item) =>
                 returnedPackageKeys.has(`${item.pkgno}_${item.pkgdate}`)
@@ -749,14 +755,14 @@ const Багцлах = () => {
                     <div className="packing-ribbon__actions">
                         {activeSection === "all" ? (
                             <Button
-                                className="packing-action packing-move-button"
-                                disabled={loading || !selectedRows.length}
-                                onClick={handleMoveToMine}
-                                icon={<ShoppingCartOutlined />}
-                                loading={loading}
-                            >
-                                <span>Миний сагсанд оруулах</span>
-                                <span className="packing-move-button__count">{selectedRows.length}</span>
+                                    className="packing-action packing-move-button"
+                                    disabled={loading || !selectedRows.length}
+                                    onClick={handleMoveToMine}
+                                    icon={<ShoppingCartOutlined />}
+                                    loading={loading}
+                                >
+                                    <span>Миний сагсанд оруулах</span>
+                                    <span className="packing-move-button__count">{selectedRows.length}</span>
                             </Button>
                         ) : mineOrderStatus === "unpackaged" ? (
                             <>

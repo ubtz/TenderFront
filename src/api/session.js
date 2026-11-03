@@ -1,8 +1,10 @@
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
+import { normalizeAxiosError } from "./errors";
 
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 let authInterceptorId = null;
+let errorInterceptorId = null;
 
 const getApiBaseUrl = () => import.meta.env.VITE_API_URL;
 
@@ -29,21 +31,28 @@ export const getTokenClaims = () => {
 export const getSessionRole = () => getTokenClaims()?.role || "";
 
 export const installAxiosAuth = () => {
-  if (authInterceptorId !== null) return;
-  authInterceptorId = axios.interceptors.request.use((config) => {
-    const token = getToken();
-    const apiBaseUrl = getApiBaseUrl();
-    const url = config.url || "";
-    const isTenderApiRequest =
-      apiBaseUrl && (url.startsWith(apiBaseUrl) || url.startsWith("/"));
+  if (authInterceptorId === null) {
+    authInterceptorId = axios.interceptors.request.use((config) => {
+      const token = getToken();
+      const apiBaseUrl = getApiBaseUrl();
+      const url = config.url || "";
+      const isTenderApiRequest =
+        apiBaseUrl && (url.startsWith(apiBaseUrl) || url.startsWith("/"));
 
-    if (token && isTenderApiRequest) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+      if (token && isTenderApiRequest) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${token}`;
+      }
 
-    return config;
-  });
+      return config;
+    });
+  }
+  if (errorInterceptorId === null) {
+    errorInterceptorId = axios.interceptors.response.use(
+      (response) => response,
+      normalizeAxiosError,
+    );
+  }
 };
 
 export const sendHeartbeat = async () => {

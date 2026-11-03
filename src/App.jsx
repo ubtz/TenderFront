@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { Layout, Avatar, message, Dropdown, Typography, Space } from "antd";
 import {
   UserOutlined,
@@ -23,6 +23,7 @@ const Login = lazy(() => import("./pages/Login/Login"));
 const Register = lazy(() => import("./pages/Register/Register"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const Тайлан = lazy(() => import("./pages/Тайлан/Тайлан"));
+const ContractReport = lazy(() => import("./pages/Тайлан/ContractReport"));
 const Upload_Баримт = lazy(() => import("./pages/Бичиг_баримт/Upload_Баримт"));
 const Бусад = lazy(() => import("./pages/Бичиг_баримт/Бусад"));
 const Тушаал = lazy(() => import("./pages/Бичиг_баримт/Тушаал"));
@@ -42,6 +43,8 @@ const InventoryReportForm = lazy(() => import("./pages/Бүртгэл/InventoryR
 const Явц1 = lazy(() => import("./pages/Бүртгэл/Явц1"));
 const Явц2 = lazy(() => import("./pages/Бүртгэл/Явц2"));
 const ЯвцMain = lazy(() => import("./pages/Бүртгэл/ЯвцMain"));
+const SystemRequestLogs = lazy(() => import("./pages/Admin/SystemRequestLogs"));
+const BusinessAuditLogs = lazy(() => import("./pages/Admin/BusinessAuditLogs"));
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -49,6 +52,7 @@ const { Title } = Typography;
 function App() {
   const [isDirty, setIsDirty] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     return startSessionHeartbeat(() => {
@@ -73,6 +77,16 @@ function App() {
     { key: "1", icon: <SettingOutlined />, label: "Тохиргоо" },
     { key: "2", icon: <LogoutOutlined />, label: "Гарах" },
   ];
+
+  if (location.pathname === "/login") {
+    return (
+      <DirtyContext.Provider value={{ isDirty, setIsDirty }}>
+        <Suspense fallback={<div style={{ minHeight: "100vh", background: "#050d1a" }} />}>
+          <Login />
+        </Suspense>
+      </DirtyContext.Provider>
+    );
+  }
 
   return (
     <DirtyContext.Provider value={{ isDirty, setIsDirty }}>
@@ -154,6 +168,22 @@ function App() {
                 element={
                   <PrivateRoute>
                     <Home />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/Системийн-лог"
+                element={
+                  <PrivateRoute allowedUserIds={[2]}>
+                    <SystemRequestLogs />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/Бизнес-аудит"
+                element={
+                  <PrivateRoute allowedUserIds={[2]}>
+                    <BusinessAuditLogs />
                   </PrivateRoute>
                 }
               />
@@ -376,7 +406,7 @@ function App() {
                     path="/Тайлан"
                     element={
                       <PrivateRoute>
-                        <Тайлан />
+                        <ContractReport />
                       </PrivateRoute>
                     }
                   />

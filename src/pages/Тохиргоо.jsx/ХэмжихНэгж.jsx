@@ -19,8 +19,6 @@ import {
 } from "antd";
 import {
     ApartmentOutlined,
-    BarcodeOutlined,
-    ImportOutlined,
     SaveOutlined,
     SearchOutlined,
     UserOutlined,
@@ -63,7 +61,17 @@ const MeasureUnits = () => {
     const [units, setUnits] = useState([]);
     const [selectedRule, setSelectedRule] = useState("all");
     const [selectedTopRule, setSelectedTopRule] = useState("all");
+    const [measurementStatus, setMeasurementStatus] = useState("all");
     const [codeSearch, setCodeSearch] = useState("");
+    const [columnFilters, setColumnFilters] = useState({
+        code: "",
+        name: "",
+        mark: "",
+        partnumber: "",
+        sourceUnit: "",
+        measurementUnit: "",
+        editedBy: "",
+    });
     const [unitSearch, setUnitSearch] = useState("");
     const [codePage, setCodePage] = useState(1);
     const [codePageSize, setCodePageSize] = useState(50);
@@ -77,6 +85,7 @@ const MeasureUnits = () => {
     const [bulkImportText, setBulkImportText] = useState("");
     const [bulkImporting, setBulkImporting] = useState(false);
     const deferredCodeSearch = useDeferredValue(codeSearch);
+    const deferredColumnFilters = useDeferredValue(columnFilters);
 
     useEffect(() => {
         let active = true;
@@ -88,6 +97,9 @@ const MeasureUnits = () => {
                     axios.post(`${API_BASE_URL}/external/cpos/code`, {}),
                     axios.get(`${API_BASE_URL}/get/CposCodeMeasurementDetails`),
                 ]);
+
+                console.log("CPOS code response:", codeResponse.data);
+                console.log("CPOS measurement response:", measurementResponse.data);
                 if (!codeResponse.data?.status) {
                     throw new Error(codeResponse.data?.message || "CPOS code data error");
                 }
@@ -139,12 +151,17 @@ const MeasureUnits = () => {
 
     useEffect(() => {
         setCodePage(1);
-    }, [selectedRule, deferredCodeSearch]);
+    }, [selectedRule, deferredCodeSearch, deferredColumnFilters]);
 
     const ruleMap = useMemo(
         () => new Map(rules.map((rule) => [normalize(rule.no), normalize(rule.name)])),
         [rules]
     );
+
+    const hasMeasurementMapping = useCallback((code) => {
+        const saved = measurementRecords[normalize(code)];
+        return Number(saved?.measurementUnitId) > 0;
+    }, [measurementRecords]);
 
     const hierarchyIndex = useMemo(() => {
         const children = new Map();
@@ -224,13 +241,43 @@ const MeasureUnits = () => {
         return codes.filter((code) => {
             const matchesRule = selectedRule === "all" || normalize(code.no).startsWith(selectedRule);
             if (!matchesRule) return false;
-            if (!query) return true;
+            const hasMapping = hasMeasurementMapping(code.no);
+            if (measurementStatus === "mapped" && !hasMapping) return false;
+            if (measurementStatus === "unmapped" && hasMapping) return false;
             const measurement = measurementRecords[normalize(code.no)];
+            const measurementUnitId = Object.prototype.hasOwnProperty.call(
+                measurementDrafts,
+                normalize(code.no)
+            )
+                ? Number(measurementDrafts[normalize(code.no)]) || null
+                : Number(measurement?.measurementUnitId) || null;
+            const measurementUnitName = units.find(
+                (unit) => Number(unit.id) === measurementUnitId
+            )?.name || measurement?.measurementUnit || "";
+            const editedAt = measurement?.editedAt
+                ? new Date(measurement.editedAt).toLocaleString("mn-MN")
+                : "";
+            const columnValues = {
+                code: `${normalize(code.no)} ${formatCposCode(code.no)}`,
+                name: code.name,
+                mark: code.mark,
+                partnumber: code.partnumber,
+                sourceUnit: code.negj,
+                measurementUnit: measurementUnitName,
+                editedBy: `${measurement?.editedByUserName || ""} ${measurement?.editedAt || ""} ${editedAt}`,
+            };
+            const matchesColumns = Object.entries(deferredColumnFilters).every(
+                ([key, value]) => !searchable(value)
+                    || searchable(columnValues[key]).includes(searchable(value))
+            );
+            if (!matchesColumns) return false;
+            if (!query) return true;
             return [
                 code.no,
                 code.name,
                 code.rule2,
                 code.mark,
+                code.partnumber,
                 code.negj,
                 code.barcode,
                 measurement?.measurementUnit,
@@ -238,7 +285,22 @@ const MeasureUnits = () => {
             ]
                 .some((value) => searchable(value).includes(query));
         });
-    }, [codes, deferredCodeSearch, measurementRecords, selectedRule]);
+    }, [
+        codes,
+        deferredCodeSearch,
+        deferredColumnFilters,
+        hasMeasurementMapping,
+        measurementDrafts,
+        measurementRecords,
+        measurementStatus,
+        selectedRule,
+        units,
+    ]);
+
+    const mappedCodeCount = useMemo(
+        () => codes.filter((code) => hasMeasurementMapping(code.no)).length,
+        [codes, hasMeasurementMapping]
+    );
 
     const filteredUnits = useMemo(() => {
         const query = searchable(unitSearch);
@@ -367,9 +429,27 @@ const MeasureUnits = () => {
         }
     };
 
+    const columnTitle = (label, filterKey) => (
+        <div className="measurement-column-title">
+            <span>{label}</span>
+            <Input
+                allowClear
+                size="small"
+                placeholder="Хайх"
+                value={columnFilters[filterKey]}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+                onChange={(event) => setColumnFilters((current) => ({
+                    ...current,
+                    [filterKey]: event.target.value,
+                }))}
+            />
+        </div>
+    );
+
     const codeColumns = [
         {
-            title: "Код",
+            title: columnTitle("Код", "code"),
             dataIndex: "no",
             key: "no",
             width: 165,
@@ -379,7 +459,7 @@ const MeasureUnits = () => {
             ),
         },
         {
-            title: "Барааны нэр",
+            title: columnTitle("Барааны нэр", "name"),
             dataIndex: "name",
             key: "name",
             width: 300,
@@ -387,7 +467,7 @@ const MeasureUnits = () => {
             render: (value) => <Text strong>{normalize(value) || "-"}</Text>,
         },
         {
-            title: "Марк",
+            title: columnTitle("Марк", "mark"),
             dataIndex: "mark",
             key: "mark",
             width: 220,
@@ -395,7 +475,15 @@ const MeasureUnits = () => {
             render: (value) => normalize(value) || "-",
         },
         {
-            title: "Нэгж",
+            title: columnTitle("Зургийн дугаар", "partnumber"),
+            dataIndex: "partnumber",
+            key: "partnumber",
+            width: 160,
+            ellipsis: true,
+            render: (value) => normalize(value) || "-",
+        },
+        {
+            title: columnTitle("Нэгж", "sourceUnit"),
             dataIndex: "negj",
             key: "negj",
             width: 110,
@@ -404,20 +492,21 @@ const MeasureUnits = () => {
                 : "-",
         },
         {
-            title: "Хэмжих нэгж",
+            title: columnTitle("Хэмжих нэгж", "measurementUnit"),
             key: "measurementUnit",
             width: 265,
             render: (_, record) => {
                 const code = normalize(record.no);
+                const isStored = Object.prototype.hasOwnProperty.call(measurementRecords, code);
                 const savedValue = Number(measurementRecords[code]?.measurementUnitId) || null;
                 const draftValue = Object.prototype.hasOwnProperty.call(measurementDrafts, code)
                     ? Number(measurementDrafts[code]) || null
                     : savedValue;
                 const changed = draftValue !== savedValue;
+                const canSave = draftValue > 0 && (!isStored || changed);
                 return (
                     <Space.Compact block>
                         <Select
-                            allowClear
                             showSearch
                             value={draftValue ?? undefined}
                             placeholder="Нэгж сонгох"
@@ -433,20 +522,20 @@ const MeasureUnits = () => {
                             style={{ width: "100%" }}
                         />
                         <Button
-                            type={changed ? "primary" : "default"}
+                            type={canSave ? "primary" : "default"}
                             icon={<SaveOutlined />}
                             loading={savingCodes.has(code)}
-                            disabled={!changed}
+                            disabled={!canSave}
                             onClick={() => saveMeasurement(record)}
                         >
-                            Хадгалах
+                            {isStored ? "Хадгалах" : "Оруулах"}
                         </Button>
                     </Space.Compact>
                 );
             },
         },
         {
-            title: "Оруулсан / зассан",
+            title: columnTitle("Оруулсан / зассан", "editedBy"),
             key: "editedBy",
             width: 190,
             render: (_, record) => {
@@ -542,13 +631,26 @@ const MeasureUnits = () => {
                 )}
                 extra={(
                     <Space wrap>
-                        <Button icon={<ImportOutlined />} onClick={() => setBulkImportOpen(true)}>
-                            Олноор оруулах
+                        <Button
+                            type={measurementStatus === "mapped" ? "primary" : "default"}
+                            onClick={() => setMeasurementStatus((current) => (
+                                current === "mapped" ? "all" : "mapped"
+                            ))}
+                        >
+                            Оруулсан / зассан ({mappedCodeCount.toLocaleString()})
+                        </Button>
+                        <Button
+                            type={measurementStatus === "unmapped" ? "primary" : "default"}
+                            onClick={() => setMeasurementStatus((current) => (
+                                current === "unmapped" ? "all" : "unmapped"
+                            ))}
+                        >
+                            Оруулаагүй ({(codes.length - mappedCodeCount).toLocaleString()})
                         </Button>
                         <Input
                             allowClear
                             prefix={<SearchOutlined />}
-                            placeholder="Код, ангилал, нэр, марк, нэгж, баркодоор хайх"
+                            placeholder="Код, нэр, марк, зургийн дугаар, нэгж, баркодоор хайх"
                             value={codeSearch}
                             onChange={(event) => setCodeSearch(event.target.value)}
                             style={{ width: 360, maxWidth: "42vw" }}
@@ -561,6 +663,9 @@ const MeasureUnits = () => {
                     columns={codeColumns}
                     dataSource={filteredCodes}
                     rowKey="__rowKey"
+                    rowClassName={(record) => (
+                        hasMeasurementMapping(record.no) ? "measurement-audited-row" : ""
+                    )}
                     scroll={{ x: 1250, y: 560 }}
                     pagination={{
                         current: codePage,

@@ -4,6 +4,47 @@
     color: #24364b;
 }
 
+.contract-report-actions,
+.contract-report-stats {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.contract-report-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: 14px;
+}
+
+.contract-report-stats .ant-card {
+    border-color: #dce7f0;
+    border-radius: 12px;
+    background: #f9fcff;
+}
+
+.contract-report-money {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.contract-report-page .ant-table-cell {
+    vertical-align: top;
+}
+
+@media (max-width: 1000px) {
+    .contract-report-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .contract-report-stats {
+        grid-template-columns: 1fr;
+    }
+}
+
 .report-heading {
     display: flex;
     align-items: flex-end;

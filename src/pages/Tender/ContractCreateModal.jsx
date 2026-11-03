@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, message } from "antd";
+import { Button, Checkbox, DatePicker, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Spin, Upload, message } from "antd";
 import axios from "axios";
 import dayjs from "dayjs";
 import PropTypes from "prop-types";
@@ -17,13 +17,16 @@ const formatContractAmount = (value) => {
 
 const parseContractAmount = (value) => String(value ?? "").replace(/'/g, "");
 
-const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
+const ContractCreateModal = ({ open, tender, existingContracts = [], excludedBasketIds = [], onCancel, onCreated }) => {
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   const [form] = Form.useForm();
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingCompany, setLoadingCompany] = useState(false);
+  const [loadingBaskets, setLoadingBaskets] = useState(false);
+  const [basketOptions, setBasketOptions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [awardPdf, setAwardPdf] = useState(null);
   const companyRegister = Form.useWatch("companyRegister", form);
 
   const organizations = useMemo(() => {
@@ -34,8 +37,37 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
     return [...new Set([...values, "НХ"])];
   }, [tender]);
 
+  const tenderBasketIds = useMemo(() => {
+    const values = Array.isArray(tender?.basket_ids)
+      ? tender.basket_ids
+      : String(tender?.basket_ids || "").split(",");
+    return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+  }, [tender]);
+
+  const contractedBasketIds = useMemo(() => new Set(
+    existingContracts.flatMap((contract) => String(contract?.basket_ids || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean))
+  ), [existingContracts]);
+
+  const excludedBasketIdSet = useMemo(
+    () => new Set(excludedBasketIds.map((value) => String(value).trim()).filter(Boolean)),
+    [excludedBasketIds]
+  );
+
+  const availableTenderBasketIds = useMemo(
+    () => tenderBasketIds.filter((basketId) => (
+      !contractedBasketIds.has(basketId) && !excludedBasketIdSet.has(basketId)
+    )),
+    [contractedBasketIds, excludedBasketIdSet, tenderBasketIds]
+  );
+
   useEffect(() => {
     if (!open || !tender) return;
+
+    setAwardPdf(null);
+    setBasketOptions([]);
 
     form.setFieldsValue({
       organization: organizations[0],
@@ -44,6 +76,7 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
       currency: "MNT",
       companyRegister: tender.ААН_регистер || "",
       supplierName: tender.Бэлтгэн_нийлүүлэгч_ААН || "",
+      basketIds: [],
     });
 
     const loadUsers = async () => {
@@ -62,8 +95,49 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
       }
     };
 
+    const loadBaskets = async () => {
+      if (!availableTenderBasketIds.length) return;
+      try {
+        setLoadingBaskets(true);
+        const response = await axios.get(
+          `${API_BASE_URL}/get/GetBasketItemsById/${availableTenderBasketIds.join(",")}`
+        );
+        const grouped = new Map(availableTenderBasketIds.map((basketId) => [basketId, {
+          value: basketId,
+          name: `Багц #${basketId}`,
+          orderCount: 0,
+        }]));
+
+        (Array.isArray(response.data) ? response.data : []).forEach((item) => {
+          const basketId = String(item.basket_id ?? "").trim();
+          if (!basketId || !grouped.has(basketId)) return;
+          const current = grouped.get(basketId);
+          grouped.set(basketId, {
+            ...current,
+            name: String(item.basket_name || "").trim() || current.name,
+            orderCount: current.orderCount + 1,
+          });
+        });
+
+        const options = [...grouped.values()];
+        setBasketOptions(options);
+        form.setFieldValue("basketIds", options.map((item) => item.value));
+      } catch (error) {
+        setBasketOptions(availableTenderBasketIds.map((basketId) => ({
+          value: basketId,
+          name: `Багц #${basketId}`,
+          orderCount: 0,
+        })));
+        form.setFieldValue("basketIds", availableTenderBasketIds);
+        message.error(error?.response?.data?.error || "Багцны мэдээлэл татахад алдаа гарлаа");
+      } finally {
+        setLoadingBaskets(false);
+      }
+    };
+
     loadUsers();
-  }, [API_BASE_URL, form, open, organizations, tender]);
+    loadBaskets();
+  }, [API_BASE_URL, availableTenderBasketIds, form, open, organizations, tender]);
 
   const lookupCompany = async () => {
     const register = String(form.getFieldValue("companyRegister") || "").trim();
@@ -98,6 +172,10 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
+      if (!awardPdf) {
+        message.warning("Гэрээ байгуулах эрх олгосон PDF хавсаргана уу");
+        return;
+      }
       setSubmitting(true);
 
       const payload = {
@@ -120,13 +198,17 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
         Дүгнэлт: "",
         Санамж: "",
         Гэрээний_төлөв: "ШИНЭ",
-        BasketIds: tender.basket_ids || "",
+        BasketIds: values.basketIds.join(","),
         GereeUserId: values.specialistId,
       };
 
-      const response = await axios.post(`${API_BASE_URL}/post/PostGeree`, payload);
+      const formData = new FormData();
+      formData.append("contract", JSON.stringify(payload));
+      formData.append("awardPdf", awardPdf);
+      const response = await axios.post(`${API_BASE_URL}/post/PostGeree`, formData);
       message.success(response.data?.message || "Гэрээ амжилттай үүсгэгдлээ");
       form.resetFields();
+      setAwardPdf(null);
       onCreated(tender.tender_id);
     } catch (error) {
       if (error?.errorFields) return;
@@ -146,7 +228,7 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
       cancelText="Болих"
       confirmLoading={submitting}
       destroyOnHidden
-      width={620}
+      width={720}
     >
       <section className="tender-contract-source">
         <div className="tender-contract-source__title">Үндсэн мэдээлэл</div>
@@ -167,6 +249,34 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
       </section>
 
       <Form form={form} layout="vertical" requiredMark="optional">
+        <Form.Item
+          name="basketIds"
+          label="Багцны нэр"
+          rules={[{
+            type: "array",
+            min: 1,
+            required: true,
+            message: "Гэрээнд оруулах багадаа нэг багц сонгоно уу",
+          }]}
+        >
+          <Checkbox.Group className="tender-contract-baskets" disabled={loadingBaskets}>
+            {loadingBaskets ? (
+              <div className="tender-contract-baskets__loading"><Spin size="small" /> Багцуудыг уншиж байна...</div>
+            ) : basketOptions.length ? (
+              basketOptions.map((basket) => (
+                <Checkbox key={basket.value} value={basket.value} className="tender-contract-basket-option">
+                  <span className="tender-contract-basket-option__name">{basket.name}</span>
+                  <span className="tender-contract-basket-option__count">
+                    {basket.orderCount ? `${basket.orderCount} захиалга` : `Багц #${basket.value}`}
+                  </span>
+                </Checkbox>
+              ))
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Сонгох багц олдсонгүй" />
+            )}
+          </Checkbox.Group>
+        </Form.Item>
+
         <Form.Item
           name="specialistId"
           label="Гэрээний мэргэжилтэн"
@@ -264,6 +374,24 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
             />
           </Form.Item>
         </div>
+        <Form.Item label="Гэрээ байгуулах эрх олгосон (PDF)" required>
+          <Upload
+            accept=".pdf,application/pdf"
+            maxCount={1}
+            fileList={awardPdf ? [{ uid: awardPdf.uid, name: awardPdf.name, status: "done" }] : []}
+            beforeUpload={(file) => {
+              if (!file.name.toLowerCase().endsWith(".pdf") || file.size > 20 * 1024 * 1024) {
+                message.error("Зөвхөн 20 МБ хүртэлх PDF файл сонгоно уу");
+                return Upload.LIST_IGNORE;
+              }
+              setAwardPdf(file);
+              return false;
+            }}
+            onRemove={() => setAwardPdf(null)}
+          >
+            <Button>PDF сонгох (20 МБ хүртэл)</Button>
+          </Upload>
+        </Form.Item>
       </Form>
     </Modal>
   );
@@ -272,6 +400,8 @@ const ContractCreateModal = ({ open, tender, onCancel, onCreated }) => {
 ContractCreateModal.propTypes = {
   open: PropTypes.bool.isRequired,
   tender: PropTypes.object,
+  existingContracts: PropTypes.arrayOf(PropTypes.object),
+  excludedBasketIds: PropTypes.arrayOf(PropTypes.string),
   onCancel: PropTypes.func.isRequired,
   onCreated: PropTypes.func.isRequired,
 };

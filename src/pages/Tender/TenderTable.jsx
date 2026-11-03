@@ -94,15 +94,25 @@ const TenderTable = ({ data, loading, onRowClick, contractTenderIds, contractsBy
           return <Tag icon={<FileTextOutlined />}>Үүсээгүй</Tag>;
         }
 
-        const specialistName = String(
-          contractsByTenderId.get(tenderId)?.geree_user_name || ""
-        ).trim();
+        const contracts = contractsByTenderId.get(tenderId) || [];
+        const specialistNames = [...new Set(contracts
+          .map((contract) => String(contract.geree_user_name || "").trim())
+          .filter(Boolean))];
+        const tenderBasketCount = new Set(String(record.basket_ids || "")
+          .split(",").map((value) => value.trim()).filter(Boolean)).size;
+        const contractedBasketCount = new Set(contracts.flatMap((contract) =>
+          String(contract.basket_ids || "").split(",").map((value) => value.trim()).filter(Boolean)
+        )).size;
         return (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-            <Tag icon={<CheckCircleOutlined />} color="success">Үүссэн</Tag>
-            {specialistName && (
+            <Tag icon={<CheckCircleOutlined />} color="success">
+              {tenderBasketCount
+                ? `${contractedBasketCount}/${tenderBasketCount} багц гэрээтэй`
+                : `${contracts.length} гэрээ үүссэн`}
+            </Tag>
+            {specialistNames.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.25 }}>
-                {specialistName}
+                {specialistNames.join(", ")}
               </Text>
             )}
           </div>

@@ -29,12 +29,6 @@ const formatCposCode = (value) => {
     if (!/^\d{14}$/.test(code)) return original || "-";
     return code.replace(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{3})(\d{3})$/, "$1-$2-$3-$4-$5-$6");
 };
-const formatDate = (value) => {
-    const normalized = normalize(value);
-    if (!normalized) return "-";
-    const date = new Date(normalized);
-    return Number.isNaN(date.getTime()) ? normalized : date.toLocaleDateString("mn-MN");
-};
 const openDocument = (baseUrl, path) => {
     window.open(`${baseUrl}/${normalize(path).replace(/^\//, "")}`, "_blank", "noopener,noreferrer");
 };
@@ -112,7 +106,11 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, 
             message.success("Захиалгыг Миний сагс → Багцлаагүй хэсэгт буцаалаа");
         } catch (error) {
             console.error("Plan item return failed:", error);
-            message.error(error.response?.data?.message || error.message || "Захиалга буцаахад алдаа гарлаа");
+            const responseData = error.response?.data;
+            const responseMessage = typeof responseData === "string"
+                ? responseData
+                : responseData?.message || responseData?.error;
+            message.error(responseMessage || error.message || "Захиалга буцаахад алдаа гарлаа");
         } finally {
             setDeletingKey("");
         }

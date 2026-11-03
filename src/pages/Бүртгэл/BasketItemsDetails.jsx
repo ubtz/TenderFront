@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Table, Spin, message, Input, InputNumber, DatePicker, Progress, Button, Tag, Typography } from "antd";
+import { Alert, Table, Spin, message, Input, InputNumber, DatePicker, Progress, Button, Tag, Typography } from "antd";
 import {
     CheckCircleOutlined,
     ClockCircleOutlined,
@@ -83,7 +83,7 @@ const bundleItemsByCode = (items) => {
     }));
 };
 
-const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArrivalProgressChange, itemScrollY }) => {
+const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArrivalProgressChange, itemScrollY, basketDecision, sourceItems, loadingOverride = false }) => {
     const [loading, setLoading] = useState(false);
     const [items, setItems] = useState([]);
     const [branches, setBranches] = useState([]);
@@ -144,12 +144,17 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
     }, [includeReturned]);
 
     useEffect(() => {
+        if (Array.isArray(sourceItems)) {
+            setItems(sourceItems);
+            setLoading(false);
+            return;
+        }
         if (!basketIds?.length) {
             setItems([]);
             return;
         }
         fetchBasketItems(Array.isArray(basketIds) ? basketIds.join(",") : basketIds);
-    }, [basketIds, fetchBasketItems]);
+    }, [basketIds, fetchBasketItems, sourceItems]);
 
     useEffect(() => {
         const saves = arrivalSaves.current;
@@ -179,7 +184,7 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
         });
     }, []);
 
-    if (loading) {
+    if (loading || loadingOverride) {
         return (
             <div
                 style={{
@@ -236,6 +241,9 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
         }),
         { itemCount: 0, totalQty: 0, totalPrice: 0 }
     );
+    const decisionSelectedKeys = (basketDecision?.selectedBasketIds || []).map(String);
+    const decisionDisabledKeys = new Set((basketDecision?.disabledBasketIds || []).map(String));
+    const lockedBasketDetails = basketDecision?.lockedBasketDetails || {};
 
     const handleRowClick = (record) => {
         setExpandedRowKeys((prev) =>
@@ -251,15 +259,30 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
             title: "Багцны нэр",
             dataIndex: "basket_name",
             key: "basket_name",
-            render: (name, record) => (
-                <div className="basket-items-package-name">
-                    <span className="basket-items-package-name__icon"><InboxOutlined /></span>
-                    <span>
-                        <Text strong>{name}</Text>
-                        <small>Багц #{record.basket_id}</small>
-                    </span>
-                </div>
-            ),
+            render: (name, record) => {
+                const contractDetail = lockedBasketDetails[String(record.basket_id)];
+                return (
+                    <div className="basket-items-package-name">
+                        <span className="basket-items-package-name__icon"><InboxOutlined /></span>
+                        <span className="basket-items-package-name__content">
+                            <span className="basket-items-package-name__title">
+                                <Text strong>{name}</Text>
+                                {contractDetail && (
+                                    <Tag bordered={false} color="success" icon={<CheckCircleOutlined />}>
+                                        Гэрээнд орсон
+                                    </Tag>
+                                )}
+                            </span>
+                            <small>Багц #{record.basket_id}</small>
+                            {contractDetail?.specialistName && (
+                                <small className="basket-items-package-name__specialist">
+                                    Гэрээний мэргэжилтэн: {contractDetail.specialistName}
+                                </small>
+                            )}
+                        </span>
+                    </div>
+                );
+            },
         },
         {
             title: "Захиалга",
@@ -523,6 +546,15 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
 
     return (
         <div className="basket-items-workspace">
+            {basketDecision && (
+                <Alert
+                    className="basket-items-decision-alert"
+                    type="info"
+                    showIcon
+                    message="Хүчингүй багцыг чагтална уу"
+                    description="Чагталсан багц дахин зарлагдана. Чагтлаагүй багц гэрээ үүсгэх шатанд үлдэнэ."
+                />
+            )}
             <div className="basket-items-summary">
                 <div><span>Багц</span><strong>{tableData.length}</strong></div>
                 <div><span>Захиалга</span><strong>{workspaceSummary.itemCount}</strong></div>
@@ -536,6 +568,19 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
                 className="basket-items-group-table"
                 columns={basketColumns}
                 dataSource={tableData}
+                rowSelection={basketDecision ? {
+                    columnTitle: <span title="Дахин зарлах багцыг сонгох">Хүчингүй</span>,
+                    columnWidth: 92,
+                    selectedRowKeys: decisionSelectedKeys,
+                    preserveSelectedRowKeys: true,
+                    getCheckboxProps: (record) => ({
+                        disabled: decisionDisabledKeys.has(String(record.basket_id)),
+                        title: decisionDisabledKeys.has(String(record.basket_id))
+                            ? "Энэ багцад гэрээ үүссэн"
+                            : "Дахин зарлах бол чагтална уу",
+                    }),
+                    onChange: (keys) => basketDecision.onChange?.(keys.map(String)),
+                } : undefined}
                 expandable={{
                     expandedRowRender,
                     rowExpandable: (record) => record.items?.length > 0,
@@ -561,7 +606,10 @@ const BasketItemsDetails = ({ basketIds, mode, includeReturned = false, onArriva
                     },
                 }}
                 onRow={(record) => ({
-                    onClick: () => handleRowClick(record),
+                    onClick: (event) => {
+                        if (event.target instanceof Element && event.target.closest(".ant-table-selection-column")) return;
+                        handleRowClick(record);
+                    },
                     className: expandedRowKeys.includes(record.key)
                         ? "basket-items-parent-row--expanded"
                         : "",
@@ -581,6 +629,16 @@ BasketItemsDetails.propTypes = {
     includeReturned: PropTypes.bool,
     onArrivalProgressChange: PropTypes.func,
     itemScrollY: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    sourceItems: PropTypes.arrayOf(PropTypes.object),
+    loadingOverride: PropTypes.bool,
+    basketDecision: PropTypes.shape({
+        selectedBasketIds: PropTypes.arrayOf(PropTypes.string),
+        disabledBasketIds: PropTypes.arrayOf(PropTypes.string),
+        lockedBasketDetails: PropTypes.objectOf(PropTypes.shape({
+            specialistName: PropTypes.string,
+        })),
+        onChange: PropTypes.func,
+    }),
 };
 
 export default BasketItemsDetails;

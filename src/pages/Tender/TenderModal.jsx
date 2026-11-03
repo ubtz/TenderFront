@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   DatePicker,
   Descriptions,
   Form,
@@ -20,6 +21,7 @@ import {
 } from "antd";
 import {
   CheckCircleOutlined,
+  AuditOutlined,
   DeleteOutlined,
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -40,6 +42,7 @@ import PropTypes from "prop-types";
 import BasketItemsDetails from "../Бүртгэл/BasketItemsDetails";
 import ContractCreateModal from "./ContractCreateModal";
 import TenderReannounceModal from "./TenderReannounceModal";
+import TenderOrderAuditModal from "./TenderOrderAuditModal";
 import { fieldLabels, generalFieldOrder } from "./tender.fields";
 import { calcCompletion, isEmpty } from "./tender.utils";
 import { formatBudgetAmount, parseBudgetAmount } from "./tender.money";
@@ -87,6 +90,10 @@ const normalizeRecordForForm = (record) => {
 const serializeValue = (value) =>
   dayjs.isDayjs(value) ? value.format("YYYY-MM-DD") : value ?? "";
 
+const parseBasketIdList = (value) => [...new Set(
+  String(value || "").split(",").map((item) => item.trim()).filter(Boolean)
+)];
+
 const TenderModal = ({
   visible,
   record,
@@ -96,8 +103,9 @@ const TenderModal = ({
   onSuspend,
   onActivate,
   onDelete,
+  onResetReannouncement,
   hasContract,
-  existingContract,
+  existingContracts = [],
   onContractCreated,
   onReannounced,
 }) => {
@@ -108,6 +116,10 @@ const TenderModal = ({
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [contractModalOpen, setContractModalOpen] = useState(false);
   const [reannounceModalOpen, setReannounceModalOpen] = useState(false);
+  const [orderAuditOpen, setOrderAuditOpen] = useState(false);
+  const [invalidBasketIds, setInvalidBasketIds] = useState([]);
+  const [basketSummary, setBasketSummary] = useState([]);
+  const [basketSummaryLoading, setBasketSummaryLoading] = useState(false);
   const [orderEditorOpen, setOrderEditorOpen] = useState(false);
   const [fieldOrder, setFieldOrder] = useState(() => [...generalFieldOrder]);
   const [draftFieldOrder, setDraftFieldOrder] = useState(() => [...generalFieldOrder]);
@@ -131,9 +143,34 @@ const TenderModal = ({
   const isSuspended = !String(activeRecord?.түтгэлзүүлсэн_огноо || "").startsWith("1900");
   const isWaitingExternal = activeRecord?.lifecycle_status === "WaitingExternal";
   const showReturnedContract = !isHistoricalView && Boolean(record?.has_returned_contract);
-  const contractSpecialistName = String(
-    existingContract?.geree_user_name || ""
-  ).trim();
+  const tenderBasketIds = useMemo(
+    () => parseBasketIdList(record?.basket_ids),
+    [record?.basket_ids]
+  );
+  const contractedBasketIds = useMemo(() => new Set(
+    existingContracts.flatMap((contract) => parseBasketIdList(contract?.basket_ids))
+  ), [existingContracts]);
+  const contractedBasketDetails = useMemo(() => {
+    const details = {};
+    existingContracts.forEach((contract) => {
+      const specialistName = String(contract?.geree_user_name || "").trim();
+      parseBasketIdList(contract?.basket_ids).forEach((basketId) => {
+        details[basketId] = { specialistName };
+      });
+    });
+    return details;
+  }, [existingContracts]);
+  const availableBasketCount = tenderBasketIds.filter(
+    (basketId) => !contractedBasketIds.has(basketId)
+  ).length;
+  const allBasketsContracted = tenderBasketIds.length > 0 && availableBasketCount === 0;
+  const invalidTenderBasketIds = invalidBasketIds.filter(
+    (basketId) => tenderBasketIds.includes(basketId) && !contractedBasketIds.has(basketId)
+  );
+  const contractAvailableCount = availableBasketCount - invalidTenderBasketIds.length;
+  const contractSpecialistNames = [...new Set(existingContracts
+    .map((contract) => String(contract?.geree_user_name || "").trim())
+    .filter(Boolean))];
   const completion = useMemo(
     () => calcCompletion(activeRecord, completionMode),
     [activeRecord, completionMode]
@@ -145,7 +182,10 @@ const TenderModal = ({
   }, [activeRecord, form]);
 
   useEffect(() => {
-    if (visible && record?.tender_id) setActiveTab("general");
+    if (visible && record?.tender_id) {
+      setActiveTab("general");
+      setInvalidBasketIds([]);
+    }
   }, [record?.tender_id, visible]);
 
   useEffect(() => {
@@ -177,6 +217,56 @@ const TenderModal = ({
       cancelled = true;
     };
   }, [record, visible]);
+
+  useEffect(() => {
+    const basketIds = parseBasketIdList(activeRecord?.basket_ids);
+    if (!visible || !basketIds.length) {
+      setBasketSummary([]);
+      return;
+    }
+
+    let cancelled = false;
+    setBasketSummaryLoading(true);
+    axios.get(`${API_BASE_URL}/get/GetBasketItemsById/${basketIds.join(",")}`)
+      .then((response) => {
+        if (cancelled) return;
+        const groups = new Map(basketIds.map((basketId) => [basketId, {
+          basketId,
+          name: `Багц ${basketId}`,
+          orderKeys: new Set(),
+        }]));
+        const items = Array.isArray(response.data) ? response.data : [];
+        items.forEach((item, index) => {
+          const basketId = String(item?.basket_id ?? "").trim();
+          if (!basketId || !groups.has(basketId)) return;
+          const group = groups.get(basketId);
+          const code = String(item?.code || "").trim();
+          group.name = String(item?.basket_name || "").trim() || group.name;
+          group.orderKeys.add(code || `item-${item?.basket_item_id || index}`);
+        });
+        setBasketSummary([...groups.values()].map((group) => ({
+          basketId: group.basketId,
+          name: group.name,
+          orderCount: group.orderKeys.size,
+        })));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Tender basket summary fetch failed:", error);
+        setBasketSummary(basketIds.map((basketId) => ({
+          basketId,
+          name: `Багц ${basketId}`,
+          orderCount: 0,
+        })));
+      })
+      .finally(() => {
+        if (!cancelled) setBasketSummaryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRecord?.basket_ids, visible]);
 
   useEffect(() => {
     try {
@@ -351,6 +441,67 @@ const TenderModal = ({
     </Descriptions>
   );
 
+  const basketShortcutPanel = (
+    <section className="tender-basket-shortcut">
+      <div className="tender-basket-shortcut__header">
+        <div>
+          <span className="tender-basket-shortcut__eyebrow">Багцын товч мэдээлэл</span>
+          <strong>{basketSummary.length} багц · {basketSummary.reduce((sum, basket) => sum + basket.orderCount, 0)} захиалга</strong>
+        </div>
+        <Button size="small" icon={<ShoppingCartOutlined />} onClick={() => setActiveTab("items")}>
+          Харах
+        </Button>
+      </div>
+      <Spin spinning={basketSummaryLoading}>
+        <div className="tender-basket-shortcut__list">
+          {basketSummary.map((basket) => {
+            const contractDetail = contractedBasketDetails[basket.basketId];
+            const isInvalid = invalidTenderBasketIds.includes(basket.basketId);
+            return (
+              <div className="tender-basket-shortcut__item" key={basket.basketId}>
+                <span className="tender-basket-shortcut__icon"><FolderOpenOutlined /></span>
+                <div className="tender-basket-shortcut__identity">
+                  <strong title={basket.name}>{basket.name}</strong>
+                  <span>{basket.orderCount} захиалга</span>
+                </div>
+                <div className="tender-basket-shortcut__status">
+                  {isHistoricalView ? (
+                    <Tag bordered={false}>Түүхэн багц</Tag>
+                  ) : contractDetail ? (
+                    <>
+                      <Tag bordered={false} color="success" icon={<CheckCircleOutlined />}>Гэрээнд орсон</Tag>
+                      {contractDetail.specialistName && <small>{contractDetail.specialistName}</small>}
+                    </>
+                  ) : !isWaitingExternal && !isManagement ? (
+                    <Checkbox
+                      checked={isInvalid}
+                      onChange={(event) => {
+                        setInvalidBasketIds((current) => event.target.checked
+                          ? [...new Set([...current, basket.basketId])]
+                          : current.filter((basketId) => basketId !== basket.basketId));
+                      }}
+                    >
+                      <span className={isInvalid ? "is-invalid" : ""}>
+                        {isInvalid ? "Хүчингүй · Дахин зарлана" : "Хүчингүй"}
+                      </span>
+                    </Checkbox>
+                  ) : isInvalid ? (
+                    <Tag bordered={false} color="orange" icon={<ReloadOutlined />}>Дахин зарлана</Tag>
+                  ) : (
+                    <Tag bordered={false} color="blue">Шийдвэр хүлээж буй</Tag>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {!basketSummaryLoading && basketSummary.length === 0 && (
+            <Text type="secondary">Багцын мэдээлэл алга.</Text>
+          )}
+        </div>
+      </Spin>
+    </section>
+  );
+
   const tabItems = [
     {
       key: "general",
@@ -393,6 +544,12 @@ const TenderModal = ({
           basketIds={activeRecord.basket_ids}
           includeReturned={isHistoricalView}
           itemScrollY="min(420px, 45vh)"
+          basketDecision={!isHistoricalView && !isWaitingExternal && !isManagement ? {
+            selectedBasketIds: invalidTenderBasketIds,
+            disabledBasketIds: [...contractedBasketIds],
+            lockedBasketDetails: contractedBasketDetails,
+            onChange: setInvalidBasketIds,
+          } : undefined}
         />
       ),
     },
@@ -404,12 +561,14 @@ const TenderModal = ({
     ? "Түүхэн хувилбар дээр үйлдэл хийх боломжгүй"
     : isSuspended
     ? "Түдгэлзүүлсэн тендерт гэрээ үүсгэх боломжгүй"
-    : hasContract
-      ? `Энэ тендерт гэрээ аль хэдийн үүссэн${
-          contractSpecialistName
-            ? ` · Гэрээний мэргэжилтэн: ${contractSpecialistName}`
+    : allBasketsContracted
+      ? `Тендерийн бүх багц гэрээнд орсон${
+          contractSpecialistNames.length
+            ? ` · Гэрээний мэргэжилтэн: ${contractSpecialistNames.join(", ")}`
             : ""
         }`
+    : contractAvailableCount === 0
+      ? "Сонгосон бүх үлдсэн багцыг хүчингүй гэж тэмдэглэсэн байна"
     : completion < 100
       ? "Тендерийн мэдээллийг 100% бүрдүүлсний дараа гэрээ үүсгэнэ"
       : isManagement
@@ -444,7 +603,11 @@ const TenderModal = ({
                 <Tag color={isWaitingExternal ? "gold" : isSuspended ? "warning" : "success"}>
                   {isWaitingExternal ? "Дахин зарласан" : isSuspended ? "Түдгэлзүүлсэн" : "Идэвхтэй"}
                 </Tag>
-                {hasContract && <Tag icon={<CheckCircleOutlined />} color="success">Гэрээ үүссэн</Tag>}
+                {hasContract && (
+                  <Tag icon={<CheckCircleOutlined />} color="success">
+                    {contractedBasketIds.size}/{tenderBasketIds.length} багц гэрээтэй
+                  </Tag>
+                )}
                 {showReturnedContract && !hasContract && (
                   <Tag icon={<ReloadOutlined />} color="warning">Гэрээнээс буцаасан</Tag>
                 )}
@@ -492,28 +655,47 @@ const TenderModal = ({
           </div>
         )}
 
-        <div className="tender-modal-body">
+        <div className={`tender-modal-body ${activeTab === "items" ? "without-basket-panel" : ""}`}>
           <main className="tender-workspace-main">
             <Form form={form} layout="vertical">
               <Tabs type="card" activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
             </Form>
           </main>
 
+          {activeTab !== "items" && (
+            <aside className="tender-basket-panel">
+              {basketShortcutPanel}
+            </aside>
+          )}
+
           <aside className="tender-version-panel">
             <div className="tender-side-section-title">
               <SafetyCertificateOutlined /> Үйлдэл
             </div>
             <Space direction="vertical" size={8} style={{ width: "100%", marginBottom: 20 }}>
+              <Button
+                block
+                icon={<AuditOutlined />}
+                onClick={() => setOrderAuditOpen(true)}
+              >
+                Захиалга шалгах
+              </Button>
               <Tooltip title={contractDisabledReason} placement="left">
                 <span style={{ width: "100%" }}>
                   <Button
                     type="primary"
                     block
-                    icon={hasContract ? <CheckCircleOutlined /> : <FileTextOutlined />}
+                    icon={allBasketsContracted ? <CheckCircleOutlined /> : <FileTextOutlined />}
                     disabled={Boolean(contractDisabledReason)}
                     onClick={() => setContractModalOpen(true)}
                   >
-                    {hasContract ? "Гэрээ үүссэн" : "Гэрээ үүсгэх"}
+                    {allBasketsContracted
+                      ? "Бүх багц гэрээтэй"
+                      : hasContract
+                        ? `Үлдсэн ${contractAvailableCount} багцад гэрээ үүсгэх`
+                        : invalidTenderBasketIds.length
+                          ? `${contractAvailableCount} багцад гэрээ үүсгэх`
+                          : "Гэрээ үүсгэх"}
                   </Button>
                 </span>
               </Tooltip>
@@ -525,8 +707,10 @@ const TenderModal = ({
                     ? "Түдгэлзүүлсэн тендерийг дахин зарлах боломжгүй"
                     : isHistoricalView
                       ? "Түүхэн хувилбарыг дахин зарлах боломжгүй"
-                    : hasContract
-                      ? "Гэрээ үүссэн тендерийг дахин зарлах боломжгүй"
+                    : allBasketsContracted
+                      ? "Тендерийн бүх багц гэрээнд орсон тул дахин зарлах боломжгүй"
+                    : invalidTenderBasketIds.length === 0
+                      ? "Захиалга хэсгээс хүчингүй багц сонгоно уу"
                       : ""}
                   placement="left"
                 >
@@ -534,10 +718,10 @@ const TenderModal = ({
                     <Button
                       block
                       icon={<ReloadOutlined />}
-                      disabled={hasContract || isSuspended || isHistoricalView || isWaitingExternal}
+                      disabled={allBasketsContracted || invalidTenderBasketIds.length === 0 || isSuspended || isHistoricalView || isWaitingExternal}
                       onClick={() => setReannounceModalOpen(true)}
                     >
-                      Тендер дахин зарлах
+                      Тендер дахин зарлах ({invalidTenderBasketIds.length})
                     </Button>
                   </span>
                 </Tooltip>
@@ -573,37 +757,55 @@ const TenderModal = ({
                   </Button>
                 )
               )}
-              <Tooltip
-                title={isWaitingExternal
-                  ? "Хүлээгдэж буй тендерийг устгах боломжгүй"
-                  : isHistoricalView
-                  ? "Түүхэн хувилбарыг устгах боломжгүй"
-                  : hasContract
-                    ? "Гэрээ үүссэн тендерийг устгах боломжгүй"
-                    : ""}
-                placement="left"
-              >
-                <span style={{ width: "100%" }}>
-                  <Button
-                    block
-                    danger
-                    icon={<DeleteOutlined />}
-                    disabled={hasContract || isHistoricalView || isWaitingExternal}
-                    onClick={() => {
-                      Modal.confirm({
-                        title: "Тендер устгах уу?",
-                        content: `“${record.tender_name || record.тендерийн_дугаар || "Тендер"}” дахин харагдахгүй болно.`,
-                        okText: "Устгах",
-                        okButtonProps: { danger: true },
-                        cancelText: "Болих",
-                        onOk: () => onDelete(record),
-                      });
-                    }}
-                  >
-                    Тендер устгах
-                  </Button>
-                </span>
-              </Tooltip>
+              {isWaitingExternal && !isHistoricalView ? (
+                <Button
+                  block
+                  danger
+                  icon={<ReloadOutlined />}
+                  onClick={() => {
+                    Modal.confirm({
+                      title: "Дахин зарлалтын хүлээлтийг цэвэрлэх үү?",
+                      content: "Тендер идэвхтэй төлөвт буцаж, дахин турших боломжтой болно. Гадаад системд өмнө илгээсэн хүсэлт буцаагдахгүй.",
+                      okText: "Цэвэрлээд идэвхтэй болгох",
+                      okButtonProps: { danger: true },
+                      cancelText: "Болих",
+                      onOk: () => onResetReannouncement(record),
+                    });
+                  }}
+                >
+                  Хүлээлтийг цэвэрлэх
+                </Button>
+              ) : (
+                <Tooltip
+                  title={isHistoricalView
+                    ? "Түүхэн хувилбарыг устгах боломжгүй"
+                    : hasContract
+                      ? "Гэрээ үүссэн тендерийг устгах боломжгүй"
+                      : ""}
+                  placement="left"
+                >
+                  <span style={{ width: "100%" }}>
+                    <Button
+                      block
+                      danger
+                      icon={<DeleteOutlined />}
+                      disabled={hasContract || isHistoricalView}
+                      onClick={() => {
+                        Modal.confirm({
+                          title: "Тендер устгах уу?",
+                          content: `“${record.tender_name || record.тендерийн_дугаар || "Тендер"}” дахин харагдахгүй болно.`,
+                          okText: "Устгах",
+                          okButtonProps: { danger: true },
+                          cancelText: "Болих",
+                          onOk: () => onDelete(record),
+                        });
+                      }}
+                    >
+                      Тендер устгах
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
             </Space>
 
             <div className="tender-side-divider" />
@@ -692,6 +894,8 @@ const TenderModal = ({
       <ContractCreateModal
         open={contractModalOpen}
         tender={record}
+        existingContracts={existingContracts}
+        excludedBasketIds={invalidTenderBasketIds}
         onCancel={() => setContractModalOpen(false)}
         onCreated={(tenderId) => {
           setContractModalOpen(false);
@@ -701,11 +905,19 @@ const TenderModal = ({
       <TenderReannounceModal
         open={reannounceModalOpen}
         record={record}
+        existingContracts={existingContracts}
+        recycleBasketIds={invalidTenderBasketIds}
         onClose={() => setReannounceModalOpen(false)}
         onArchived={(result) => {
           setReannounceModalOpen(false);
+          setInvalidBasketIds([]);
           onReannounced?.(record?.tender_id, result);
         }}
+      />
+      <TenderOrderAuditModal
+        open={orderAuditOpen}
+        record={activeRecord}
+        onClose={() => setOrderAuditOpen(false)}
       />
     </>
   );
@@ -720,8 +932,9 @@ TenderModal.propTypes = {
   onSuspend: PropTypes.func.isRequired,
   onActivate: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
+  onResetReannouncement: PropTypes.func.isRequired,
   hasContract: PropTypes.bool,
-  existingContract: PropTypes.object,
+  existingContracts: PropTypes.arrayOf(PropTypes.object),
   onContractCreated: PropTypes.func.isRequired,
   onReannounced: PropTypes.func,
 };

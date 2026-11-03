@@ -49,6 +49,7 @@ const GereeModal = ({ visible, record, onClose, handleUpdate, canReturn, onRetur
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [returnComment, setReturnComment] = useState("");
   const [returning, setReturning] = useState(false);
+  const [openingAwardPdf, setOpeningAwardPdf] = useState(false);
   const { draft: localRecord, setDraft, saveField } = useContractDraft(record, visible, handleUpdate);
   const regValue = String(localRecord?.["ААН_регистер"] || "");
   const [arrivalPercent, setArrivalPercent] = useState(null);
@@ -166,6 +167,30 @@ const GereeModal = ({ visible, record, onClose, handleUpdate, canReturn, onRetur
     }
   };
 
+  const openAwardPdf = async () => {
+    const pdfWindow = window.open("about:blank", "_blank");
+    if (!pdfWindow) {
+      message.warning("PDF үзэхийн тулд шинэ цонх нээхийг зөвшөөрнө үү");
+      return;
+    }
+    pdfWindow.opener = null;
+    try {
+      setOpeningAwardPdf(true);
+      const response = await axios.get(`${API_BASE_URL}/get/ContractAwardPdf/${localRecord.GereeId}`, {
+        responseType: "blob",
+      });
+      const fileUrl = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
+      pdfWindow.location.href = fileUrl;
+      setTimeout(() => URL.revokeObjectURL(fileUrl), 60000);
+    } catch (error) {
+      pdfWindow.close();
+      message.error("PDF файлыг нээж чадсангүй");
+      console.error("Contract award PDF fetch failed:", error);
+    } finally {
+      setOpeningAwardPdf(false);
+    }
+  };
+
   return (
     <>
       <Modal
@@ -251,6 +276,15 @@ const GereeModal = ({ visible, record, onClose, handleUpdate, canReturn, onRetur
                       { key: "type", label: "Төрөл", children: localRecord["тендерийн_төрөл"] || "—" },
                     ]}
                   />
+                  {localRecord.contractAwardPdfFileName && (
+                    <Button
+                      icon={<FileTextOutlined />}
+                      loading={openingAwardPdf}
+                      onClick={openAwardPdf}
+                    >
+                      Гэрээ байгуулах эрх олгосон: {localRecord.contractAwardPdfFileName}
+                    </Button>
+                  )}
                 </div>
 
                 <FieldLabel>Гэрээний нэр</FieldLabel>

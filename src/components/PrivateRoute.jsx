@@ -2,7 +2,7 @@ import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { getTokenClaims } from "../api/session";
 
-const PrivateRoute = ({ children, allowedRoles }) => {
+const PrivateRoute = ({ children, allowedRoles, allowedUserIds }) => {
     const token = localStorage.getItem("token");
     const location = useLocation();
 
@@ -23,6 +23,10 @@ const PrivateRoute = ({ children, allowedRoles }) => {
         }
 
         if (allowedRoles?.length && !allowedRoles.includes(decoded.role)) {
+            return <Navigate to="/" replace />;
+        }
+
+        if (allowedUserIds?.length && !allowedUserIds.includes(Number(decoded.user_id))) {
             return <Navigate to="/" replace />;
         }
 

@@ -22,13 +22,15 @@ const normalizeText = (value) => String(unwrapApiValue(value) || "").trim();
 
 export const fetchOrdersToken = async () => "server-managed";
 
-export const fetchOrders = async (year, month, token) => {
+export const fetchOrders = async (year, month, token, options = {}) => {
   const url = `${ORDERS_API_URL}/list`;
   const response = await axios.post(url, {
     Yy: year,
     Mm: month,
     Man: "",
     Token: token,
+  }, {
+    params: options.audit ? { audit: true } : undefined,
   });
 
   return response;
@@ -71,6 +73,7 @@ export const returnOrder = async (pkgno, pkgdate, man, comment, cancel, token) =
     });
     return response;
   } catch (error) {
+    error.requestLog = requestLog;
     console.error("[orders/back] failed", {
       message: error.message,
       status: error.response?.status,
