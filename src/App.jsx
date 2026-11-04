@@ -17,6 +17,7 @@ import {
 } from "./api/session";
 
 import PrivateRoute from "./components/PrivateRoute";
+import { fullReloadTo } from "./utils/sessionNavigation";
 
 const Home = lazy(() => import("./pages/Home"));
 const Login = lazy(() => import("./pages/Login/Login"));
@@ -57,9 +58,9 @@ function App() {
   useEffect(() => {
     return startSessionHeartbeat(() => {
       message.error("Сесс дууссан тул дахин нэвтэрнэ үү");
-      navigate("/login", { replace: true });
+      fullReloadTo("/login");
     });
-  }, [navigate]);
+  }, []);
 
   const accessType = getSessionRole();
   const handleMenuClick = async ({ key }) => {
@@ -68,8 +69,7 @@ function App() {
       await logoutSession().catch(() => {});
       localStorage.removeItem("token");
       localStorage.removeItem("data");
-      message.success("Амжилттай гарлаа!");
-      navigate("/login");
+      fullReloadTo("/login");
     }
   };
 

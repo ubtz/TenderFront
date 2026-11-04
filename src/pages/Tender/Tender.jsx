@@ -305,9 +305,9 @@ const Tender = () => {
         onDelete={handleDelete}
         onResetReannouncement={handleResetReannouncement}
         onReannounced={async (tenderId, result) => {
+          setSelectedTender(null);
+          setModalVisible(false);
           if (result?.archived) {
-            setSelectedTender(null);
-            setModalVisible(false);
             setFilterType("waiting");
           }
           await fetchTenders();

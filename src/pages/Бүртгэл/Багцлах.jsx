@@ -35,8 +35,76 @@ const months = Array.from({ length: 12 }, (_, index) => index + 1);
 const isInvalidTokenResponse = (response) =>
     String(response?.data?.message || "").toLowerCase().includes("token incorrect");
 const flattenRows = (rows) => rows.flatMap((row) => row.items?.length ? row.items : [row]);
+const normalizePackageDate = (value) => {
+    const normalized = String(value?.String ?? value ?? "").trim();
+    const match = normalized.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    return match
+        ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`
+        : normalized;
+};
 const getPackageIdentity = (item) =>
-    `${String(item.pkgno?.String ?? item.pkgno ?? "").trim()}-${String(item.pkgdate?.String ?? item.pkgdate ?? "").trim()}`;
+    `${String(item.pkgno?.String ?? item.pkgno ?? "").trim().toLocaleLowerCase()}-${normalizePackageDate(item.pkgdate)}`;
+const getPackageNumberIdentity = (item) => {
+    const pkgno = String(item.pkgno?.String ?? item.pkgno ?? "").trim().toLocaleLowerCase();
+    return pkgno ? `pkg:${pkgno}` : "";
+};
+const buildReturnHistoryMap = (items, returnedByName = "") => {
+    const grouped = new Map();
+    items.forEach((item) => {
+        const key = getPackageIdentity(item);
+        if (key === "-") return;
+        const current = grouped.get(key) || {
+            pkgno: String(item.pkgno || "").trim(),
+            pkgdate: String(item.pkgdate || "").trim(),
+            pkgname: String(item.pkgname || "").trim(),
+            comments: [],
+            returnedAt: "",
+            isCancelled: false,
+            returnedCount: 0,
+            cycleMap: new Map(),
+        };
+        const comment = String(item.tailbar || "").trim();
+        if (comment && !current.comments.includes(comment)) current.comments.push(comment);
+        const returnedAt = String(item.returnedAt || "").trim();
+        if (returnedAt && (!current.returnedAt || returnedAt > current.returnedAt)) {
+            current.returnedAt = returnedAt;
+        }
+        current.isCancelled = current.isCancelled || Boolean(item.isCancelled);
+        const cycleKey = [
+            returnedAt || "no-date",
+            comment || "no-comment",
+            item.isCancelled ? "cancelled" : "returned",
+        ].join("|");
+        const cycle = current.cycleMap.get(cycleKey) || {
+            returnedAt,
+            comment,
+            returnedBy: returnedByName,
+            isCancelled: Boolean(item.isCancelled),
+            orders: [],
+        };
+        cycle.orders.push(item);
+        current.cycleMap.set(cycleKey, cycle);
+        grouped.set(key, current);
+    });
+    [...grouped.values()].forEach((history) => {
+        history.cycles = [...history.cycleMap.values()]
+            .sort((first, second) => String(first.returnedAt).localeCompare(String(second.returnedAt)))
+            .map((cycle, index) => ({ ...cycle, returnNumber: index + 1 }));
+        history.returnedCount = history.cycles.length;
+        delete history.cycleMap;
+    });
+    [...grouped.values()].forEach((history) => {
+        const numberKey = getPackageNumberIdentity(history);
+        const existing = grouped.get(numberKey);
+        if (numberKey && (!existing || String(history.returnedAt) > String(existing.returnedAt))) {
+            grouped.set(numberKey, history);
+        }
+    });
+    return grouped;
+};
+const findReturnHistory = (historyMap, item) => historyMap.get(getPackageIdentity(item))
+    || historyMap.get(getPackageNumberIdentity(item))
+    || null;
 
 const Багцлах = () => {
     const user = useMemo(() => {
@@ -94,7 +162,7 @@ const Багцлах = () => {
             if (cachedOrders) {
                 setLoading(true);
                 try {
-                    const { userItems, allItems } = await loadBasketStateRef.current();
+                    const { userItems, allItems, returnHistoryByPackage } = await loadBasketStateRef.current();
                     const ownKeys = new Set(userItems.map(getOrderOwnershipIdentity));
                     const stagedKeys = new Set(stagedOrders.current.map(getOrderIdentity));
                     const claimedOwners = new Map();
@@ -111,6 +179,7 @@ const Багцлах = () => {
                             ...item,
                             isLocked: claimedOwners.has(getOrderOwnershipIdentity(item)),
                             claimedBy: claimedOwners.get(getOrderOwnershipIdentity(item)) || "",
+                            returnHistory: findReturnHistory(returnHistoryByPackage, item),
                         })));
                 } finally {
                     setLoading(false);
@@ -148,7 +217,11 @@ const Багцлах = () => {
                 }
 
                 // 3️⃣ reload local basket state
-                const { userItems: filteredItems, allItems } = await loadBasketStateRef.current();
+                const {
+                    userItems: filteredItems,
+                    allItems,
+                    returnHistoryByPackage,
+                } = await loadBasketStateRef.current();
                 const basketKeys = new Set(filteredItems.map(getOrderOwnershipIdentity));
                 const claimedOwners = new Map();
                 allItems.forEach((item) => {
@@ -175,6 +248,7 @@ const Багцлах = () => {
                     month: getOrderMonth(rec),
                     isLocked: claimedOwners.has(getOrderOwnershipIdentity(rec)),
                     claimedBy: claimedOwners.get(getOrderOwnershipIdentity(rec)) || "",
+                    returnHistory: findReturnHistory(returnHistoryByPackage, rec),
                 }));
 
                 // 6️⃣ cache the complete year; month buttons only filter this data
@@ -229,6 +303,14 @@ const Багцлах = () => {
                 && !item.isTenderReannounced
                 && String(item.userId) === String(user?.id)
         );
+        const activePackageKeys = new Set(
+            userItems.flatMap((item) => [getPackageIdentity(item), getPackageNumberIdentity(item)].filter(Boolean))
+        );
+        const returnedByName = [user?.ovog ?? user?.Ovog, user?.ner ?? user?.Ner].filter(Boolean).join(" ")
+            || user?.username
+            || user?.Username
+            || "";
+        const returnHistoryByPackage = buildReturnHistoryMap(returnedItems, returnedByName);
         const tempItems = tempBasket
             ? userItems.filter(
                 (item) => String(item.basketId) === String(tempBasket.basket_id)
@@ -246,20 +328,27 @@ const Багцлах = () => {
                 key: `temp-${item.basketItemId}`,
                 year: getOrderYear(item),
                 month: getOrderMonth(item),
+                returnHistory: findReturnHistory(returnHistoryByPackage, item),
             }))
         );
         setPackagedOrders(
             finalItems.map((item) => {
                 const basket = basketMap.get(String(item.basketId));
+                const basketType = String(basket?.basket_type || "").trim().toUpperCase();
                 return {
                     ...item,
                     key: `packaged-${item.basketItemId}`,
                     year: getOrderYear(item),
                     month: getOrderMonth(item),
-                    destinationBasketName:
-                        String(basket?.basket_type || "").trim().toUpperCase() === PLAN_INBOX_TYPE
-                            ? `Төлөвлөгөө: ${basket?.plan_name || "Нэргүй"}`
-                            : basket?.basket_name || "",
+                    returnHistory: findReturnHistory(returnHistoryByPackage, item),
+                    destinationPlanName: String(basket?.plan_name || "").trim(),
+                    destinationPlanRootNumber: basket?.plan_root_number || "",
+                    destinationBasketName: basketType === PLAN_INBOX_TYPE
+                        ? ""
+                        : String(basket?.basket_name || "").trim(),
+                    destinationAssignmentStatus: basketType === PLAN_INBOX_TYPE
+                        ? "Хуваарилаагүй захиалга"
+                        : "",
                 };
             })
         );
@@ -269,9 +358,13 @@ const Багцлах = () => {
                 key: `returned-${item.basketItemId}`,
                 year: getOrderYear(item),
                 month: getOrderMonth(item),
+                restoredToMyBasket:
+                    activePackageKeys.has(getPackageIdentity(item))
+                    || activePackageKeys.has(getPackageNumberIdentity(item)),
+                returnedByName,
             }))
         );
-        return { userItems, allItems: activeItems };
+        return { userItems, allItems: activeItems, returnedItems, returnHistoryByPackage };
     }, [API_BASE_URL, user?.id]);
     loadBasketStateRef.current = loadBasketState;
 
@@ -651,24 +744,51 @@ const Багцлах = () => {
         () => new Set(visibleAllData.filter((item) => item.pkgno).map(getPackageIdentity)).size,
         [visibleAllData]
     );
+    const filterMyOrdersByPeriod = useCallback(
+        (items) => items.filter((item) =>
+            String(item.year) === String(activeYear)
+            && (!activeMonths.length || activeMonths.includes(item.month))
+        ),
+        [activeMonths, activeYear]
+    );
+    const visibleYourOrders = useMemo(
+        () => filterMyOrdersByPeriod(yourOrders),
+        [filterMyOrdersByPeriod, yourOrders]
+    );
+    const visiblePackagedOrders = useMemo(
+        () => filterMyOrdersByPeriod(packagedOrders),
+        [filterMyOrdersByPeriod, packagedOrders]
+    );
+    const visibleReturnedOrders = useMemo(
+        () => filterMyOrdersByPeriod(returnedOrders),
+        [filterMyOrdersByPeriod, returnedOrders]
+    );
     const unpackagedPackageCount = useMemo(
-        () => new Set(yourOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
-        [yourOrders]
+        () => new Set(visibleYourOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
+        [visibleYourOrders]
     );
     const packagedPackageCount = useMemo(
-        () => new Set(packagedOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
-        [packagedOrders]
+        () => new Set(visiblePackagedOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
+        [visiblePackagedOrders]
     );
     const returnedPackageCount = useMemo(
-        () => new Set(returnedOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
-        [returnedOrders]
+        () => new Set(visibleReturnedOrders.filter((item) => item.pkgno).map(getPackageIdentity)).size,
+        [visibleReturnedOrders]
     );
     const mineOrders = mineOrderStatus === "packaged"
-        ? packagedOrders
+        ? visiblePackagedOrders
         : mineOrderStatus === "returned"
-            ? returnedOrders
-            : yourOrders;
-    const myPackageCount = unpackagedPackageCount + packagedPackageCount + returnedPackageCount;
+            ? visibleReturnedOrders
+            : visibleYourOrders;
+    const myPackageCount = useMemo(
+        () => new Set(
+            [...visibleYourOrders, ...visiblePackagedOrders]
+                .filter((item) => item.pkgno)
+                .map(getPackageIdentity)
+        ).size,
+        [visiblePackagedOrders, visibleYourOrders]
+    );
+    const myOrderCount = visibleYourOrders.length + visiblePackagedOrders.length;
 
     if (!user) {
         return <div style={{ padding: 20 }}>Хэрэглэгч нэвтрээгүй байна.</div>;
@@ -872,7 +992,7 @@ const Багцлах = () => {
                                 <span className="packing-tab-label">
                                     <UserOutlined />
                                     <strong>Миний сагс</strong>
-                                    <small>{myPackageCount.toLocaleString()} багц · {(yourOrders.length + packagedOrders.length + returnedOrders.length).toLocaleString()} захиалга</small>
+                                    <small>{myPackageCount.toLocaleString()} багц · {myOrderCount.toLocaleString()} захиалга</small>
                                 </span>
                             ),
                             children: (
@@ -884,21 +1004,21 @@ const Багцлах = () => {
                                                 label: "Багцлаагүй",
                                                 icon: <ShoppingCartOutlined />,
                                                 packages: unpackagedPackageCount,
-                                                orders: yourOrders.length,
+                                                orders: visibleYourOrders.length,
                                             },
                                             {
                                                 key: "packaged",
                                                 label: "Багцалсан",
                                                 icon: <AppstoreAddOutlined />,
                                                 packages: packagedPackageCount,
-                                                orders: packagedOrders.length,
+                                                orders: visiblePackagedOrders.length,
                                             },
                                             {
                                                 key: "returned",
                                                 label: "Буцаасан",
                                                 icon: <RollbackOutlined />,
                                                 packages: returnedPackageCount,
-                                                orders: returnedOrders.length,
+                                                orders: visibleReturnedOrders.length,
                                             },
                                         ].map((option) => (
                                             <button

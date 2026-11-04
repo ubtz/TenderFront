@@ -19,12 +19,14 @@ import {
 } from "antd";
 import {
     ApartmentOutlined,
+    BarChartOutlined,
     SaveOutlined,
     SearchOutlined,
     UserOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
 import "./ХэмжихНэгж.css";
+import MeasurementReport from "./ХэмжихНэгжТайлан";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 const { Text, Title } = Typography;
@@ -82,6 +84,7 @@ const MeasureUnits = () => {
     const [measurementDrafts, setMeasurementDrafts] = useState({});
     const [savingCodes, setSavingCodes] = useState(() => new Set());
     const [bulkImportOpen, setBulkImportOpen] = useState(false);
+    const [reportOpen, setReportOpen] = useState(false);
     const [bulkImportText, setBulkImportText] = useState("");
     const [bulkImporting, setBulkImporting] = useState(false);
     const deferredCodeSearch = useDeferredValue(codeSearch);
@@ -724,6 +727,14 @@ const MeasureUnits = () => {
                     <Text type="secondary">CPOS ангиллын дагуу барааны код, марк, баркод болон хэмжих нэгжийг харах.</Text>
                 </div>
                 <Space size={18} wrap>
+                    <Button
+                        type="primary"
+                        icon={<BarChartOutlined />}
+                        onClick={() => setReportOpen(true)}
+                        disabled={loading || !codes.length}
+                    >
+                        Тайлан
+                    </Button>
                     <Statistic title="Ангилал" value={rules.length} />
                     <Statistic title="Барааны код" value={codes.length} groupSeparator="," />
                     <Statistic title="Хэмжих нэгж" value={units.length} />
@@ -740,6 +751,14 @@ const MeasureUnits = () => {
                     ]}
                 />
             </Spin>
+            <MeasurementReport
+                open={reportOpen}
+                onClose={() => setReportOpen(false)}
+                codes={codes}
+                rules={rules}
+                units={units}
+                measurementRecords={measurementRecords}
+            />
             <Modal
                 title="Хэмжих нэгж олноор оруулах"
                 open={bulkImportOpen}

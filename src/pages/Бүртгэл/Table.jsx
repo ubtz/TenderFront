@@ -20,6 +20,7 @@ import {
   MoreOutlined,
   PlusOutlined,
   SearchOutlined,
+  SyncOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
 import { groupBy } from "lodash";
@@ -79,6 +80,7 @@ const GroupedTable = ({
 }) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [expandedPackageKeys, setExpandedPackageKeys] = useState([]);
+  const [openReturnHistoryKeys, setOpenReturnHistoryKeys] = useState([]);
   const [searchText, setSearchText] = useState("");
   const [itemFilters, setItemFilters] = useState({});
   const [branches, setBranches] = useState([]);
@@ -130,10 +132,98 @@ const GroupedTable = ({
       const destinationBasketNames = [
         ...new Set(items.map((item) => item.destinationBasketName).filter(Boolean)),
       ];
+      const destinationAssignmentStatuses = [
+        ...new Set(items.map((item) => item.destinationAssignmentStatus).filter(Boolean)),
+      ];
+      const destinationPlanNames = [
+        ...new Set(items.map((item) => normalize(item.destinationPlanName)).filter(Boolean)),
+      ];
+      const destinationPlanRootNumbers = [
+        ...new Set(items.map((item) => normalize(item.destinationPlanRootNumber)).filter(Boolean)),
+      ];
       const returnComments = [
         ...new Set(items.map((item) => normalize(item.tailbar)).filter(Boolean)),
       ];
       const isCancelled = items.some((item) => item.isCancelled);
+      const restoredToMyBasket = items.some((item) => item.restoredToMyBasket);
+      const returnedAt = items
+        .map((item) => normalize(item.returnedAt))
+        .filter(Boolean)
+        .sort()
+        .at(-1) || "";
+      const returnedByNames = [
+        ...new Set(items.map((item) => normalize(item.returnedByName)).filter(Boolean)),
+      ];
+      const returnCycleMap = new Map();
+      items.forEach((item) => {
+        const cycleReturnedAt = normalize(item.returnedAt);
+        const cycleComment = normalize(item.tailbar);
+        const cycleReturnedBy = normalize(item.returnedByName);
+        if (!cycleReturnedAt && !cycleComment) return;
+
+        const cycleKey = [
+          cycleReturnedAt || "no-date",
+          cycleComment || "no-comment",
+          item.isCancelled ? "cancelled" : "returned",
+          cycleReturnedBy || "no-user",
+        ].join("|");
+        const cycle = returnCycleMap.get(cycleKey) || {
+          returnedAt: cycleReturnedAt,
+          comment: cycleComment,
+          returnedBy: cycleReturnedBy,
+          isCancelled: Boolean(item.isCancelled),
+          itemCount: 0,
+          orders: [],
+        };
+        cycle.itemCount += 1;
+        cycle.orders.push({
+          ...item,
+          calculatedPriceSum: calculateOrderTotal(item),
+        });
+        returnCycleMap.set(cycleKey, cycle);
+      });
+      const returnCycles = [...returnCycleMap.values()]
+        .sort((first, second) => first.returnedAt.localeCompare(second.returnedAt))
+        .map((cycle, index) => ({ ...cycle, returnNumber: index + 1 }));
+      const latestReturnCycle = returnCycles.at(-1);
+      const summaryItems = showReturnComment && latestReturnCycle
+        ? latestReturnCycle.orders
+        : items;
+      const returnHistories = items.map((item) => item.returnHistory).filter(Boolean);
+      const previousCycleMap = new Map();
+      returnHistories.forEach((history) => {
+        (history.cycles || []).forEach((cycle) => {
+          const cycleKey = [
+            normalize(cycle.returnedAt) || "no-date",
+            normalize(cycle.comment) || "no-comment",
+            cycle.isCancelled ? "cancelled" : "returned",
+          ].join("|");
+          if (previousCycleMap.has(cycleKey)) return;
+          previousCycleMap.set(cycleKey, {
+            ...cycle,
+            orders: (cycle.orders || []).map((item) => ({
+              ...item,
+              calculatedPriceSum: calculateOrderTotal(item),
+            })),
+          });
+        });
+      });
+      const previousReturnCycles = [...previousCycleMap.values()]
+        .sort((first, second) => normalize(first.returnedAt).localeCompare(normalize(second.returnedAt)))
+        .map((cycle, index) => ({
+          ...cycle,
+          itemCount: cycle.orders.length,
+          returnNumber: index + 1,
+        }));
+      const previousReturnComments = [
+        ...new Set(returnHistories.flatMap((history) => history.comments || []).map(normalize).filter(Boolean)),
+      ];
+      const previousReturnedAt = returnHistories
+        .map((history) => normalize(history.returnedAt))
+        .filter(Boolean)
+        .sort()
+        .at(-1) || "";
+      const wasReturnedBefore = returnHistories.length > 0;
 
       const packageKey = `pkg-${pkgno || "none"}-${pkgdate || "no-date"}`;
       return {
@@ -145,13 +235,26 @@ const GroupedTable = ({
         year,
         month,
         dname: firstItem.dname || "",
-        quantity: items.reduce((sum, item) => sum + toNumber(item.qty), 0),
-        totalPrice: items.reduce((sum, item) => sum + calculateOrderTotal(item), 0),
+        quantity: summaryItems.reduce((sum, item) => sum + toNumber(item.qty), 0),
+        totalPrice: summaryItems.reduce((sum, item) => sum + calculateOrderTotal(item), 0),
+        displayItemCount: summaryItems.length,
         isLocked: items.some((item) => item.isLocked),
         claimedBy,
         destinationBasketNames,
+        destinationAssignmentStatuses,
+        destinationPlanNames,
+        destinationPlanRootNumbers,
         returnComments,
         isCancelled,
+        restoredToMyBasket,
+        returnedAt,
+        returnedByNames,
+        returnCycles,
+        wasReturnedBefore,
+        previousReturnCycles,
+        previousReturnComments,
+        previousReturnedAt,
+        previousReturnWasCancelled: returnHistories.some((history) => history.isCancelled),
         items: items.map((item, index) => ({
           ...item,
           calculatedPriceSum: calculateOrderTotal(item),
@@ -161,7 +264,7 @@ const GroupedTable = ({
         techurl: firstItem.techurl || "",
       };
     });
-  }, [data]);
+  }, [data, showReturnComment]);
 
   const filteredData = useMemo(() => {
     const query = normalize(searchText).toLocaleLowerCase();
@@ -179,6 +282,11 @@ const GroupedTable = ({
         record.dname,
         getServiceByShortName(record.dname),
         ...record.claimedBy,
+        ...record.destinationPlanNames,
+        ...record.destinationBasketNames,
+        ...record.destinationAssignmentStatuses,
+        ...record.returnComments,
+        ...record.previousReturnComments,
       ];
       const itemValues = record.items.flatMap((item) => [
         item.cr4name,
@@ -221,6 +329,7 @@ const GroupedTable = ({
   useEffect(() => {
     setSelectedRowKeys([]);
     setExpandedPackageKeys([]);
+    setOpenReturnHistoryKeys([]);
     onSelectRows?.([]);
   }, [selectionResetToken, onSelectRows]);
 
@@ -230,6 +339,11 @@ const GroupedTable = ({
         ? keys.filter((key) => key !== recordKey)
         : [...keys, recordKey]
     );
+  }, []);
+
+  const openReturnHistory = useCallback((recordKey) => {
+    setExpandedPackageKeys((keys) => keys.includes(recordKey) ? keys : [...keys, recordKey]);
+    setOpenReturnHistoryKeys((keys) => keys.includes(recordKey) ? keys : [...keys, recordKey]);
   }, []);
 
   const handleOpenInventory = (record) => {
@@ -416,7 +530,11 @@ const GroupedTable = ({
       fixed: "left",
       sorter: (first, second) => first.pkgno.localeCompare(second.pkgno),
       render: (value, record) => (
-        <Space direction="vertical" size={6}>
+        <Space
+          className={showReturnComment ? "returned-package-summary" : undefined}
+          direction="vertical"
+          size={6}
+        >
           <Space size={8}>
             <FolderOpenOutlined
               style={{
@@ -427,19 +545,64 @@ const GroupedTable = ({
             <Text strong copyable={value ? { text: value } : false}>
               Багц № {value || "Дугааргүй"}
             </Text>
+            {(record.wasReturnedBefore || record.restoredToMyBasket || (showReturnComment && record.returnCycles.length > 0)) && (
+              <Tooltip
+                title={`${record.wasReturnedBefore ? record.previousReturnCycles.length : record.returnCycles.length} удаа буцаасан · Сүүлийн огноо: ${formatDisplayDate(record.wasReturnedBefore ? record.previousReturnedAt : record.returnedAt) || "Огноо бүртгэгдээгүй"}`}
+              >
+                <span
+                  className="return-history-indicator"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Буцаалтын түүх харах"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openReturnHistory(record.key);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openReturnHistory(record.key);
+                  }}
+                >
+                  <SyncOutlined />
+                  <span className="return-history-indicator__count">
+                    {record.wasReturnedBefore ? record.previousReturnCycles.length : record.returnCycles.length}
+                  </span>
+                </span>
+              </Tooltip>
+            )}
           </Space>
           <Tag bordered={false} style={{ background: "#f0f0f0", color: "#595959" }}>
-            {record.items.length} захиалга
+            {record.displayItemCount} захиалга
+            {showReturnComment && record.returnCycles.length > 1
+              ? ` · ${record.returnCycles.length} буцаалт`
+              : ""}
           </Tag>
           {record.pkgname && (
             <Text type="secondary" ellipsis={{ tooltip: record.pkgname }}>
               {record.pkgname}
             </Text>
           )}
-          {record.destinationBasketNames.length > 0 && (
-            <Text type="secondary" ellipsis={{ tooltip: record.destinationBasketNames.join(", ") }}>
-              → {record.destinationBasketNames.join(", ")}
-            </Text>
+          {(record.destinationPlanNames.length > 0 || record.destinationBasketNames.length > 0 || record.destinationAssignmentStatuses.length > 0) && (
+            <Tooltip
+              title={[
+                record.destinationPlanNames.length ? `Төлөвлөгөө: ${record.destinationPlanNames.join(", ")}` : "",
+                record.destinationBasketNames.length ? `Багц: ${record.destinationBasketNames.join(", ")}` : "",
+                record.destinationAssignmentStatuses.length ? `Төлөв: ${record.destinationAssignmentStatuses.join(", ")}` : "",
+              ].filter(Boolean).join(" · ")}
+            >
+              <div className="package-destination">
+                <FileTextOutlined />
+                <Text ellipsis>
+                  {record.destinationPlanNames.length
+                    ? `Төлөвлөгөө: ${record.destinationPlanNames.join(", ")}`
+                    : record.destinationBasketNames.length
+                      ? `Багц: ${record.destinationBasketNames.join(", ")}`
+                      : `Төлөв: ${record.destinationAssignmentStatuses.join(", ")}`}
+                </Text>
+              </div>
+            </Tooltip>
           )}
         </Space>
       ),
@@ -526,23 +689,52 @@ const GroupedTable = ({
       ) : null,
     },
     ...(showReturnComment ? [{
-      title: "Буцаасан тайлбар",
+      title: "Буцаалтын мэдээлэл",
       key: "returnComment",
-      width: 300,
-      render: (_, record) => record.returnComments.length ? (
-        <Space direction="vertical" size={3}>
-          <Tag color={record.isCancelled ? "error" : "warning"}>
-            {record.isCancelled ? "Цуцалсан" : "Буцаасан"}
-          </Tag>
-          {record.returnComments.map((comment) => (
-            <Text key={comment} style={{ whiteSpace: "normal" }}>
-              {comment}
-            </Text>
-          ))}
-        </Space>
-      ) : (
-        <Text type="secondary">Тайлбаргүй</Text>
-      ),
+      width: 330,
+      render: (_, record) => {
+        const latestCycle = record.returnCycles.at(-1);
+        const cycleCount = record.returnCycles.length;
+        const status = cycleCount > 1
+          ? `${cycleCount} удаа буцаасан`
+          : record.restoredToMyBasket
+            ? "Засварлагдаж дахин ирсэн"
+            : latestCycle?.isCancelled ? "Цуцалсан" : "Буцаасан";
+        const latestComment = latestCycle?.comment || "Тайлбаргүй";
+        const summary = `${record.restoredToMyBasket ? "Дахин ирсэн · " : ""}Сүүлийн тайлбар: ${latestComment}`;
+        const returnedMeta = [
+          formatDisplayDate(latestCycle?.returnedAt || record.returnedAt),
+          latestCycle?.returnedBy || record.returnedByNames.join(", "),
+        ].filter(Boolean).join(" · ") || "Огноо бүртгэгдээгүй";
+        const historyTooltip = record.returnCycles.length
+          ? record.returnCycles
+            .map((cycle) => `${cycle.returnNumber}-р буцаалт: ${formatDisplayDate(cycle.returnedAt) || "Огноогүй"} · ${cycle.comment || "Тайлбаргүй"}`)
+            .join("\n")
+          : summary;
+
+        return (
+          <div className="returned-info-cell">
+            <div className="returned-info-cell__meta">
+              <Tag
+                bordered={false}
+                color={record.restoredToMyBasket ? "processing" : latestCycle?.isCancelled ? "error" : "warning"}
+              >
+                {status}
+              </Tag>
+              <Text type="secondary" ellipsis={{ tooltip: returnedMeta }}>
+                {returnedMeta}
+              </Text>
+            </div>
+            <Tooltip
+              title={<span style={{ whiteSpace: "pre-line" }}>{historyTooltip}</span>}
+            >
+              <Text className="returned-info-cell__summary" type="secondary" ellipsis>
+                {summary}
+              </Text>
+            </Tooltip>
+          </div>
+        );
+      },
     }] : []),
     {
       title: "Үйлдэл",
@@ -603,7 +795,13 @@ const GroupedTable = ({
               <Tag color="processing">{selectedRecords.length} багц сонгосон</Tag>
             )}
             {expandedPackageKeys.length > 0 && (
-              <Button size="small" onClick={() => setExpandedPackageKeys([])}>
+              <Button
+                size="small"
+                onClick={() => {
+                  setExpandedPackageKeys([]);
+                  setOpenReturnHistoryKeys([]);
+                }}
+              >
                 Бүгдийг хураах ({expandedPackageKeys.length})
               </Button>
             )}
@@ -634,6 +832,7 @@ const GroupedTable = ({
       </div>
 
       <Table
+        className="package-main-table"
         columns={columns}
         dataSource={filteredData}
         rowKey="key"
@@ -649,14 +848,19 @@ const GroupedTable = ({
         }}
         expandable={{
           expandedRowKeys: expandedPackageKeys,
+          expandedRowClassName: () => "package-expanded-row",
           showExpandColumn: false,
           rowExpandable: (record) => record.items.length > 0,
           expandedRowRender: (record) => {
+            const historyCycles = showReturnComment
+              ? record.returnCycles
+              : record.previousReturnCycles;
+            const latestHistoryCycle = historyCycles.at(-1);
             return (
               <div
                 className="package-detail-panel"
                 style={{
-                  margin: "0 12px 20px",
+                  margin: "0 0 20px",
                   background: "#fff",
                   border: "1px solid #a9cde2",
                   borderTop: 0,
@@ -669,9 +873,28 @@ const GroupedTable = ({
                   <div className="package-detail-owner__identity">
                     <FolderOpenOutlined />
                     <Text strong>Багц № {record.pkgno || "Дугааргүй"}-ийн захиалгууд</Text>
-                    <Tag color="blue">{record.items.length} захиалга</Tag>
+                    <Tag color="blue">
+                      {showReturnComment
+                        ? `${record.returnCycles.length} буцаалт`
+                        : `${record.displayItemCount} захиалга`}
+                    </Tag>
                   </div>
                   <Space size={16} wrap>
+                    {record.destinationPlanNames.map((planName) => (
+                      <Tag key={planName} color="geekblue" icon={<FileTextOutlined />}>
+                        Төлөвлөгөө: {planName}
+                      </Tag>
+                    ))}
+                    {record.destinationBasketNames.map((basketName) => (
+                      <Tag key={basketName} color="cyan">
+                        Багц: {basketName}
+                      </Tag>
+                    ))}
+                    {record.destinationAssignmentStatuses.map((status) => (
+                      <Tag key={status} color="gold">
+                        Төлөв: {status}
+                      </Tag>
+                    ))}
                     <Text type="secondary">
                       {getServiceByShortName(record.dname)}{record.dname ? ` (${record.dname})` : ""}
                     </Text>
@@ -682,22 +905,105 @@ const GroupedTable = ({
                     )}
                   </Space>
                 </div>
-                <Table
-                  size="small"
-                  sticky
-                  pagination={{
-                    defaultPageSize: 20,
-                    pageSizeOptions: [20, 50, 100],
-                    showSizeChanger: record.items.length > 20,
-                    hideOnSinglePage: record.items.length <= 20,
-                    showTotal: (total, range) => `${range[0]}–${range[1]} / ${total}`,
-                  }}
-                  scroll={{ x: 1120, y: 480 }}
-                  columns={nestedColumns}
-                  dataSource={record.items}
-                  rowKey="reactKey"
-                  locale={{ emptyText: <Empty description="Захиалга байхгүй" /> }}
-                />
+                {historyCycles.length > 0 && openReturnHistoryKeys.includes(record.key) && (
+                  <details
+                    className="return-cycle-history"
+                    open={openReturnHistoryKeys.includes(record.key)}
+                    onToggle={(event) => {
+                      const isOpen = event.currentTarget.open;
+                      setOpenReturnHistoryKeys((keys) => isOpen
+                        ? keys.includes(record.key) ? keys : [...keys, record.key]
+                        : keys.filter((key) => key !== record.key));
+                    }}
+                  >
+                    <summary className="return-cycle-history__summary">
+                      <div className="return-cycle-history__summary-main">
+                        <Text strong>Буцаалтын түүх</Text>
+                        <Text type="secondary" ellipsis>
+                          Сүүлийн: {formatDisplayDate(latestHistoryCycle?.returnedAt) || "Огноогүй"}
+                          {latestHistoryCycle?.comment ? ` · ${latestHistoryCycle.comment}` : ""}
+                        </Text>
+                      </div>
+                      <Space size={6}>
+                        {(record.restoredToMyBasket || record.wasReturnedBefore) && <Tag color="processing">Дахин ирсэн</Tag>}
+                        <Tag>{historyCycles.length} удаа</Tag>
+                        <span className="return-cycle-history__toggle" />
+                      </Space>
+                    </summary>
+                    <div className="return-cycle-history__list">
+                      {[...historyCycles].reverse().map((cycle) => {
+                        const isLatest = cycle.returnNumber === historyCycles.length;
+                        return (
+                          <article
+                            className={`return-cycle-card ${isLatest ? "is-latest" : ""}`}
+                            key={`${cycle.returnedAt}-${cycle.returnNumber}`}
+                          >
+                            <div className="return-cycle-card__marker">
+                              <span>{cycle.returnNumber}</span>
+                            </div>
+                            <div className="return-cycle-card__body">
+                              <div className="return-cycle-card__title">
+                                <Space size={6}>
+                                  <Text strong>{cycle.returnNumber}-р буцаалт</Text>
+                                  {isLatest && <Tag color="blue">Сүүлийн</Tag>}
+                                  {cycle.isCancelled && <Tag color="error">Цуцалсан</Tag>}
+                                </Space>
+                                <Text type="secondary">
+                                  {formatDisplayDate(cycle.returnedAt) || "Огноо бүртгэгдээгүй"}
+                                  {cycle.returnedBy ? ` · ${cycle.returnedBy}` : ""}
+                                </Text>
+                              </div>
+                              <Text>{cycle.comment || "Тайлбар бүртгэгдээгүй"}</Text>
+                              <details className="return-cycle-card__orders">
+                                <summary>
+                                  <Text strong>{cycle.itemCount} захиалга</Text>
+                                  <span className="return-cycle-card__orders-toggle" />
+                                </summary>
+                                <div className="return-cycle-card__orders-table">
+                                  <Table
+                                    size="small"
+                                    pagination={false}
+                                    scroll={{ x: 1120 }}
+                                    columns={nestedColumns}
+                                    dataSource={cycle.orders}
+                                    rowKey={(item) => `return-${cycle.returnNumber}-${normalize(item.basketItemId)}`}
+                                    locale={{ emptyText: <Empty description="Захиалга байхгүй" /> }}
+                                  />
+                                </div>
+                              </details>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
+                {!showReturnComment && (
+                  <div className="current-package-orders">
+                    {historyCycles.length > 0 && (
+                      <div className="current-package-orders__header">
+                        <Text strong>Одоогийн идэвхтэй захиалга</Text>
+                        <Tag color="green">Идэвхтэй · {record.displayItemCount} захиалга</Tag>
+                      </div>
+                    )}
+                    <Table
+                      size="small"
+                      sticky
+                      pagination={{
+                        defaultPageSize: 20,
+                        pageSizeOptions: [20, 50, 100],
+                        showSizeChanger: record.items.length > 20,
+                        hideOnSinglePage: record.items.length <= 20,
+                        showTotal: (total, range) => `${range[0]}–${range[1]} / ${total}`,
+                      }}
+                      scroll={{ x: 1120, y: 480 }}
+                      columns={nestedColumns}
+                      dataSource={record.items}
+                      rowKey="reactKey"
+                      locale={{ emptyText: <Empty description="Захиалга байхгүй" /> }}
+                    />
+                  </div>
+                )}
               </div>
             );
           },
@@ -705,10 +1011,11 @@ const GroupedTable = ({
         onRow={(record) => ({
           onClick: (event) => {
             if (event.target.closest("button, a, input, .ant-dropdown")) return;
+            if (showReturnComment) return;
             togglePackageDetails(record.key);
           },
           style: {
-            cursor: "pointer",
+            cursor: showReturnComment ? "default" : "pointer",
             background: record.isLocked
               ? "#fff7f6"
               : selectedRowKeys.includes(record.key)

@@ -18,13 +18,16 @@ import {
 } from "antd";
 import {
     CalendarOutlined,
+    CheckCircleOutlined,
     DeleteOutlined,
+    DownOutlined,
     FileAddOutlined,
     FolderOpenOutlined,
     LockOutlined,
     ProjectOutlined,
     PlusOutlined,
     ReloadOutlined,
+    RightOutlined,
     RollbackOutlined,
     SearchOutlined,
     SwapOutlined,
@@ -69,6 +72,32 @@ const getConsolidationKey = (item, index = 0) => {
 const countConsolidatedOrders = (items) => new Set(
     items.map((item, index) => getConsolidationKey(item, index))
 ).size;
+const parseBasketIds = (value) => normalize(value)
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+const getTenderLabel = (tender) => {
+    if (!tender) return "";
+    return normalize(tender.тендерийн_дугаар)
+        || (tender.tender_id ? `Тендер #${tender.tender_id}` : "Тендер");
+};
+const getPlanTenderSummary = (baskets) => {
+    const tenders = [];
+    const seen = new Set();
+    baskets.forEach((basket) => {
+        if (!basket.tender) return;
+        const key = normalize(basket.tender.tender_id) || getTenderLabel(basket.tender);
+        if (seen.has(key)) return;
+        seen.add(key);
+        tenders.push(basket.tender);
+    });
+    return {
+        tenders,
+        tender_count: tenders.length,
+        tendered_basket_count: baskets.filter((basket) => Boolean(basket.tender)).length,
+        available_basket_count: baskets.filter((basket) => !basket.tender).length,
+    };
+};
 const DEFAULT_BASKET_TYPE = "Ерөнхий";
 
 const ТөлөвлөгөөTable = () => {
@@ -152,15 +181,27 @@ const ТөлөвлөгөөTable = () => {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [plansResult, basketsResult, usersResult, branchesResult] = await Promise.allSettled([
+            const [plansResult, basketsResult, usersResult, branchesResult, tendersResult] = await Promise.allSettled([
                 axios.get(`${API_BASE_URL}/get/GetAll`),
                 axios.get(`${API_BASE_URL}/get/basket`),
                 axios.get(`${API_BASE_URL}/get/GetUsers`),
                 axios.get(`${API_BASE_URL}/get/branches`),
+                axios.get(`${API_BASE_URL}/get/GetTender`),
             ]);
             if (plansResult.status === "rejected") throw plansResult.reason;
             if (usersResult.status === "fulfilled") setUsers(usersResult.value.data || []);
             if (branchesResult.status === "fulfilled") setBranches(branchesResult.value.data || []);
+
+            const tenderByBasketId = new Map();
+            if (tendersResult.status === "fulfilled") {
+                (tendersResult.value.data || []).forEach((tender) => {
+                    parseBasketIds(tender.basket_ids).forEach((basketId) => {
+                        if (!tenderByBasketId.has(basketId)) tenderByBasketId.set(basketId, tender);
+                    });
+                });
+            } else {
+                console.error("Plan tender information fetch failed:", tendersResult.reason);
+            }
 
             const planMap = new Map();
             (plansResult.value.data || []).forEach((plan) => {
@@ -231,6 +272,7 @@ const ТөлөвлөгөөTable = () => {
                                 source_item_count: items.length,
                                 items,
                                 is_valid: Boolean(basket.is_valid),
+                                tender: tenderByBasketId.get(String(basket.basket_id)) || null,
                             };
                         });
 
@@ -247,6 +289,7 @@ const ТөлөвлөгөөTable = () => {
                         total_price: baskets.reduce((sum, basket) => sum + basket.total_price, 0),
                         item_count: baskets.reduce((sum, basket) => sum + basket.item_count, 0) + inboxItems.length,
                         pending_count: inboxItems.length,
+                        ...getPlanTenderSummary(baskets),
                     };
                 })
                 .filter((plan) => plan.baskets.length > 0 || plan.inbox_items.length > 0)
@@ -264,6 +307,30 @@ const ТөлөвлөгөөTable = () => {
     useEffect(() => {
         loadData();
     }, [loadData]);
+
+    const returnBasketToMyBasket = async (basket) => {
+        try {
+            const targetBasketId = await ensureTempBasket();
+            const response = await axios.put(`${API_BASE_URL}/put/ReturnPlanBasket`, {
+                basket_id: toInteger(basket.basket_id),
+                target_basket_id: toInteger(targetBasketId),
+                user_id: toInteger(user.id),
+            });
+            const movedCount = Number(response.data?.moved_count || 0);
+            if (movedCount <= 0) throw new Error("Буцаасан захиалга олдсонгүй");
+            setExpandedBasketKeys((keys) => keys.filter((key) => key !== basket.key));
+            await loadData();
+            message.success(`“${basket.basket_name}” багцын ${movedCount} захиалгыг Миний сагс → Багцалсан хэсэгт буцаалаа`);
+            return true;
+        } catch (error) {
+            console.error("Plan basket return failed:", error);
+            const responseMessage = typeof error.response?.data === "string"
+                ? error.response.data
+                : error.response?.data?.message || error.response?.data?.error;
+            message.error(responseMessage || error.message || "Багцыг Миний сагс руу буцаахад алдаа гарлаа");
+            return false;
+        }
+    };
 
     const handleReturnInboxToMyBasket = async (plan) => {
         const itemIds = plan.inbox_items.map(getItemId).filter(Boolean);
@@ -327,6 +394,7 @@ const ТөлөвлөгөөTable = () => {
                 total_price: baskets.reduce((sum, basket) => sum + basket.total_price, 0),
                 item_count: baskets.reduce((sum, basket) => sum + basket.item_count, 0) + inboxItems.length,
                 pending_count: inboxItems.length,
+                ...getPlanTenderSummary(baskets),
             }] : [];
         });
     }, [activeYear, data]);
@@ -336,7 +404,12 @@ const ТөлөвлөгөөTable = () => {
         if (!query) return yearFilteredData;
 
         return yearFilteredData.flatMap((plan) => {
-            const planMatches = [plan.plan_name, plan.plan_root_number, getUserName(plan.user_id)]
+            const planMatches = [
+                plan.plan_name,
+                plan.plan_root_number,
+                getUserName(plan.user_id),
+                ...plan.tenders.map(getTenderLabel),
+            ]
                 .some((value) => normalize(value).toLocaleLowerCase().includes(query));
             if (planMatches) return [plan];
 
@@ -345,6 +418,7 @@ const ТөлөвлөгөөTable = () => {
                     basket.basket_name,
                     basket.basket_number,
                     basket.set_date,
+                    getTenderLabel(basket.tender),
                 ].some((value) => normalize(value).toLocaleLowerCase().includes(query));
                 const itemMatches = basket.items.some((item) => [
                     item.pkgno,
@@ -371,6 +445,7 @@ const ТөлөвлөгөөTable = () => {
                 total_price: baskets.reduce((sum, basket) => sum + basket.total_price, 0),
                 item_count: baskets.reduce((sum, basket) => sum + basket.item_count, 0) + inboxItems.length,
                 pending_count: inboxItems.length,
+                ...getPlanTenderSummary(baskets),
             }] : [];
         });
     }, [getUserName, searchText, yearFilteredData]);
@@ -379,6 +454,14 @@ const ТөлөвлөгөөTable = () => {
         planCount: filteredData.length,
         basketCount: filteredData.reduce((sum, plan) => sum + plan.baskets.length, 0),
         itemCount: filteredData.reduce((sum, plan) => sum + plan.item_count, 0),
+        pendingCount: filteredData.reduce((sum, plan) => sum + plan.pending_count, 0),
+        assignedCount: filteredData.reduce(
+            (sum, plan) => sum + plan.baskets.reduce((basketSum, basket) => basketSum + basket.item_count, 0),
+            0
+        ),
+        readyPlanCount: filteredData.filter(
+            (plan) => plan.available_basket_count > 0 && plan.pending_count === 0
+        ).length,
         totalPrice: filteredData.reduce((sum, plan) => sum + plan.total_price, 0),
     }), [filteredData]);
 
@@ -606,8 +689,14 @@ const ТөлөвлөгөөTable = () => {
         setCurrentPlan(plan);
         setTenderNumber("");
         setSelectedBasketIds([]);
-        setLockedBasketIds([]);
-        setBasketTenderMap({});
+        setLockedBasketIds(
+            plan.baskets.filter((basket) => basket.tender).map((basket) => String(basket.basket_id))
+        );
+        setBasketTenderMap(Object.fromEntries(
+            plan.baskets
+                .filter((basket) => basket.tender)
+                .map((basket) => [String(basket.basket_id), getTenderLabel(basket.tender)])
+        ));
         setTenderModalOpen(true);
         setTenderOptionsLoading(true);
         try {
@@ -669,6 +758,7 @@ const ТөлөвлөгөөTable = () => {
                 Basket_Ids: selectedBasketIds.join(","),
                 CreatedBy: user.id,
             });
+            await loadData();
             message.success("Тендер амжилттай үүсгэгдлээ");
             setTenderModalOpen(false);
             setCurrentPlan(null);
@@ -729,6 +819,20 @@ const ТөлөвлөгөөTable = () => {
         }
     };
 
+    const toggleBasketExpanded = (basket) => {
+        if (!basket.items?.length) return;
+        setExpandedBasketKeys((keys) => keys.includes(basket.key)
+            ? keys.filter((key) => key !== basket.key)
+            : [...keys, basket.key]);
+    };
+
+    const togglePlanExpanded = (plan) => {
+        if (!plan.baskets?.length && !plan.inbox_items?.length) return;
+        setExpandedPlanKeys((keys) => keys.includes(plan.key)
+            ? keys.filter((key) => key !== plan.key)
+            : [...keys, plan.key]);
+    };
+
     const basketColumns = [
         { title: "№", dataIndex: "basket_number", key: "basket_number", width: 70, align: "center" },
         {
@@ -737,20 +841,36 @@ const ТөлөвлөгөөTable = () => {
             key: "basket_name",
             width: 280,
             ellipsis: true,
-            render: (value, record) => (
-                <Space direction="vertical" size={3}>
-                    <Space size={8}>
-                        <FolderOpenOutlined
-                            style={{
-                                color: expandedBasketKeys.includes(record.key) ? "#4d829f" : "#8c8c8c",
-                                fontSize: 16,
-                            }}
-                        />
-                        <Text strong>{value}</Text>
-                    </Space>
-                    <Text type="secondary">{record.item_count} захиалга</Text>
-                </Space>
-            ),
+            render: (value, record) => {
+                const isExpanded = expandedBasketKeys.includes(record.key);
+                return (
+                    <div className="plan-entity-cell">
+                        <div className="plan-entity-title">
+                            <FolderOpenOutlined
+                                style={{
+                                    color: isExpanded ? "#4d829f" : "#8c8c8c",
+                                    fontSize: 16,
+                                }}
+                            />
+                            <Text strong>{value}</Text>
+                        </div>
+                        <div className="plan-row-meta">
+                            <Tag bordered={false} color={record.item_count > 0 ? "cyan" : "default"}>
+                                {record.item_count} нэгтгэсэн захиалга
+                            </Tag>
+                            {record.source_item_count !== record.item_count && (
+                                <Text type="secondary">{record.source_item_count} эх мөр</Text>
+                            )}
+                            {record.is_valid && <Tag bordered={false} color="success">Баталгаажсан</Tag>}
+                        {record.tender && (
+                            <Tag bordered={false} color="purple" icon={<LockOutlined />}>
+                                {getTenderLabel(record.tender)}
+                            </Tag>
+                        )}
+                        </div>
+                    </div>
+                );
+            },
         },
         { title: "Зарлах огноо", dataIndex: "publish_date", key: "publish_date", width: 125, render: formatDate },
         { title: "Нээх огноо", dataIndex: "set_date", key: "set_date", width: 125, render: formatDate },
@@ -763,19 +883,23 @@ const ТөлөвлөгөөTable = () => {
             sorter: (first, second) => first.total_price - second.total_price,
             render: (value) => <Text strong>{formatNumber(value)} ₮</Text>,
         },
-        ...(!isManager ? [{
+        {
             title: "Үйлдэл",
             key: "actions",
-            width: 110,
+            width: 150,
             align: "center",
             fixed: "right",
             render: (_, record) => record.item_count > 0 ? (
-                <Tooltip title="Эхлээд багц доторх захиалгуудыг хасна уу">
-                    <Button size="small" danger icon={<DeleteOutlined />} disabled>
-                        Устгах
-                    </Button>
-                </Tooltip>
-            ) : (
+                <Button
+                    className="plan-open-detail-button"
+                    size="small"
+                    icon={expandedBasketKeys.includes(record.key) ? <DownOutlined /> : <RightOutlined />}
+                    aria-expanded={expandedBasketKeys.includes(record.key)}
+                    onClick={() => toggleBasketExpanded(record)}
+                >
+                    {expandedBasketKeys.includes(record.key) ? "Хураах" : "Дэлгэрэнгүй"}
+                </Button>
+            ) : !isManager ? (
                 <Popconfirm
                     title="Багц устгах уу?"
                     description={`“${record.basket_name}” багцыг бүр мөсөн устгана.`}
@@ -793,8 +917,8 @@ const ТөлөвлөгөөTable = () => {
                         Устгах
                     </Button>
                 </Popconfirm>
-            ),
-        }] : []),
+            ) : <Tag bordered={false}>Хоосон</Tag>,
+        },
     ];
 
     const planColumns = [
@@ -804,24 +928,50 @@ const ТөлөвлөгөөTable = () => {
             key: "plan_name",
             ellipsis: true,
             sorter: (first, second) => first.plan_name.localeCompare(second.plan_name),
-            render: (value, record) => (
-                <Space direction="vertical" size={3}>
-                    <Space size={9}>
-                        <ProjectOutlined
-                            style={{
-                                color: expandedPlanKeys.includes(record.key) ? "#4d829f" : "#8c8c8c",
-                                fontSize: 17,
-                            }}
-                        />
-                        <Text strong style={{ fontSize: 15 }}>{value}</Text>
-                    </Space>
-                    <Space size={6} wrap>
-                        <Tag bordered={false}>{record.baskets.length} багц</Tag>
-                        <Text type="secondary">{record.item_count} захиалга</Text>
-                        {record.pending_count > 0 && <Tag color="gold">{record.pending_count} хуваарилаагүй</Tag>}
-                    </Space>
-                </Space>
-            ),
+            render: (value, record) => {
+                const isExpanded = expandedPlanKeys.includes(record.key);
+                const assignedCount = record.baskets.reduce((sum, basket) => sum + basket.item_count, 0);
+                const isExpandable = record.baskets.length > 0 || record.inbox_items.length > 0;
+                return (
+                    <div className="plan-entity-cell">
+                        <div className="plan-entity-title plan-entity-title--plan">
+                            <ProjectOutlined
+                                style={{
+                                    color: isExpanded ? "#4d829f" : "#8c8c8c",
+                                    fontSize: 17,
+                                }}
+                            />
+                            <Text strong style={{ fontSize: 15 }}>{value}</Text>
+                            {isExpandable ? (
+                                <span className="plan-expand-cue">
+                                    {isExpanded ? <DownOutlined /> : <RightOutlined />}
+                                    {isExpanded ? "Хураах" : "Багцуудыг нээх"}
+                                </span>
+                            ) : (
+                                <span className="plan-expand-cue plan-expand-cue--empty">Хоосон</span>
+                            )}
+                        </div>
+                        <div className="plan-row-meta">
+                            <Tag bordered={false}>{record.baskets.length} багц</Tag>
+                            <Tag bordered={false} color="cyan">{assignedCount} багцалсан</Tag>
+                            {record.tendered_basket_count > 0 && (
+                                <Tag bordered={false} color="purple">
+                                    {record.tendered_basket_count} багц тендерт орсон
+                                </Tag>
+                            )}
+                            {record.pending_count > 0 && <Tag color="gold">{record.pending_count} хуваарилаагүй</Tag>}
+                            {record.pending_count === 0 && record.available_basket_count > 0 && (
+                                <Tag bordered={false} color="success">Тендер үүсгэхэд бэлэн</Tag>
+                            )}
+                            {record.baskets.length > 0 && record.available_basket_count === 0 && (
+                                <Tag bordered={false} color="success" icon={<CheckCircleOutlined />}>
+                                    Бүх багц тендерт орсон
+                                </Tag>
+                            )}
+                        </div>
+                    </div>
+                );
+            },
         },
         {
             title: "Нийт үнэ",
@@ -843,38 +993,55 @@ const ТөлөвлөгөөTable = () => {
         {
             title: "Үйлдэл",
             key: "actions",
-            width: isManager ? 90 : 230,
+            width: isManager ? 90 : 285,
             align: "center",
             fixed: "right",
-            render: (_, record) => (
-                <Space onClick={(event) => event.stopPropagation()}>
-                    {!isManager && (
-                        <Tooltip
-                            title={record.pending_count > 0
-                                ? "Хуваарилаагүй захиалгыг багцад бүрэн хуваарилсны дараа тендер үүсгэнэ"
-                                : ""}
-                        >
+            render: (_, record) => {
+                const tenderLabels = record.tenders.map(getTenderLabel).filter(Boolean);
+                return (
+                <div className="plan-action-cell" onClick={(event) => event.stopPropagation()}>
+                    {!isManager && record.available_basket_count > 0 && (
+                        <div className="plan-action-cell__create">
+                            <Tooltip
+                                title={record.pending_count > 0
+                                    ? "Хуваарилаагүй захиалгыг багцад бүрэн хуваарилсны дараа тендер үүсгэнэ"
+                                    : ""}
+                            >
+                                <span>
+                                    <Button
+                                        className="plan-create-tender-button"
+                                        type="primary"
+                                        size="small"
+                                        icon={<FileAddOutlined />}
+                                        disabled={record.pending_count > 0}
+                                        onClick={() => openTenderModal(record)}
+                                    >
+                                        {record.tender_count > 0 ? "Үлдсэн багцаар үүсгэх" : "Тендер үүсгэх"}
+                                    </Button>
+                                </span>
+                            </Tooltip>
+                            {record.tender_count > 0 && (
+                                <small>{record.available_basket_count} багц үлдсэн</small>
+                            )}
+                        </div>
+                    )}
+                    {!isManager && record.baskets.length > 0 && record.available_basket_count === 0 && (
+                        <div className="plan-tender-state" title={tenderLabels.join(", ")}>
+                            <CheckCircleOutlined />
                             <span>
-                                <Button
-                                    className="plan-create-tender-button"
-                                    type="primary"
-                                    size="small"
-                                    icon={<FileAddOutlined />}
-                                    disabled={record.pending_count > 0}
-                                    onClick={() => openTenderModal(record)}
-                                >
-                                    Тендер үүсгэх
-                                </Button>
+                                <strong>Тендерт орсон</strong>
+                                <small>{tenderLabels.join(", ") || "Тендерийн мэдээлэл"}</small>
                             </span>
-                        </Tooltip>
+                        </div>
                     )}
                     <PrintIcon
                         normData={record}
                         planId={record.plan_root_number}
                         UserId={record.user_id}
                     />
-                </Space>
-            ),
+                </div>
+                );
+            },
         },
     ];
 
@@ -889,6 +1056,14 @@ const ТөлөвлөгөөTable = () => {
                 <Space size={16} wrap>
                     <Text type="secondary">Хариуцагч: {getUserName(plan.user_id)}</Text>
                     <Text type="secondary">{plan.item_count} захиалга</Text>
+                    {plan.tender_count > 0 && (
+                        <Tag color="purple">
+                            {plan.tender_count} тендер · {plan.tendered_basket_count} багц орсон
+                        </Tag>
+                    )}
+                    {plan.available_basket_count > 0 && (
+                        <Tag color="green">{plan.available_basket_count} багц үлдсэн</Tag>
+                    )}
                 </Space>
             </div>
             {plan.inbox_items.length > 0 && (
@@ -937,21 +1112,12 @@ const ТөлөвлөгөөTable = () => {
                     rowExpandable: (record) => record.items.length > 0,
                     expandedRowRender: (basket) => (
                         <div className="basket-detail-panel">
-                            <div className="basket-detail-owner">
-                                <div className="basket-detail-owner__identity">
-                                    <FolderOpenOutlined />
-                                    <Text strong>
-                                        {basket.basket_name}-ийн захиалгууд
-                                    </Text>
-                                    <Tag color="cyan">{basket.item_count} захиалга</Tag>
-                                </div>
-                                <Text type="secondary">Төлөвлөгөө: {plan.plan_name}</Text>
-                            </div>
                             <ТөлөвлөгөөItemDetails
                                 data={basket.items}
                                 branches={branches}
                                 onChanged={loadData}
                                 onReturnToMyBasket={returnItemsToMyBasket}
+                                onReturnWholeBasket={() => returnBasketToMyBasket(basket)}
                             />
                         </div>
                     ),
@@ -959,11 +1125,9 @@ const ТөлөвлөгөөTable = () => {
                 onRow={(record) => ({
                     onClick: (event) => {
                         if (event.target.closest("button, a, input, .ant-dropdown")) return;
-                        setExpandedBasketKeys((keys) => keys.includes(record.key)
-                            ? keys.filter((key) => key !== record.key)
-                            : [...keys, record.key]);
+                        toggleBasketExpanded(record);
                     },
-                    style: { cursor: "pointer" },
+                    style: { cursor: record.items.length > 0 ? "pointer" : "default" },
                 })}
                 rowClassName={(record) => expandedBasketKeys.includes(record.key)
                     ? "plan-basket-row plan-basket-row--expanded"
@@ -992,6 +1156,32 @@ const ТөлөвлөгөөTable = () => {
                         <span className="plan-summary-chip plan-summary-chip--price"><strong>{formatNumber(summary.totalPrice)} ₮</strong></span>
                     </div>
                 </header>
+
+                <section className="plan-workflow-strip" aria-label="Төлөвлөгөөний ажлын дараалал">
+                    <div className={`plan-workflow-step ${summary.pendingCount > 0 ? "is-warning" : "is-complete"}`}>
+                        <span className="plan-workflow-step__number">1</span>
+                        <div>
+                            <strong>Захиалга хуваарилах</strong>
+                            <small>{summary.pendingCount > 0 ? `${summary.pendingCount} захиалга хүлээгдэж байна` : "Хуваарилаагүй захиалга байхгүй"}</small>
+                        </div>
+                    </div>
+                    <RightOutlined className="plan-workflow-arrow" />
+                    <div className="plan-workflow-step is-active">
+                        <span className="plan-workflow-step__number">2</span>
+                        <div>
+                            <strong>Багцыг шалгах</strong>
+                            <small>{summary.basketCount} багц · {summary.assignedCount} нэгтгэсэн захиалга</small>
+                        </div>
+                    </div>
+                    <RightOutlined className="plan-workflow-arrow" />
+                    <div className={`plan-workflow-step ${summary.readyPlanCount > 0 ? "is-ready" : ""}`}>
+                        <span className="plan-workflow-step__number">3</span>
+                        <div>
+                            <strong>Тендер үүсгэх</strong>
+                            <small>{summary.readyPlanCount} төлөвлөгөө бэлэн</small>
+                        </div>
+                    </div>
+                </section>
 
                 <section className="plan-commandbar">
                     <div className="plan-commandbar__primary">
@@ -1060,7 +1250,7 @@ const ТөлөвлөгөөTable = () => {
                                 showTotal: (total, range) => `${range[0]}–${range[1]} / ${total}`,
                                 position: ["bottomCenter"],
                             }}
-                            scroll={{ x: 850 }}
+                            scroll={{ x: 980 }}
                             expandable={{
                                 expandedRowKeys: expandedPlanKeys,
                                 showExpandColumn: false,
@@ -1070,11 +1260,13 @@ const ТөлөвлөгөөTable = () => {
                             onRow={(record) => ({
                                 onClick: (event) => {
                                     if (event.target.closest("button, a, input, .ant-dropdown")) return;
-                                    setExpandedPlanKeys((keys) => keys.includes(record.key)
-                                        ? keys.filter((key) => key !== record.key)
-                                        : [...keys, record.key]);
+                                    togglePlanExpanded(record);
                                 },
-                                style: { cursor: "pointer" },
+                                style: {
+                                    cursor: record.baskets.length > 0 || record.inbox_items.length > 0
+                                        ? "pointer"
+                                        : "default",
+                                },
                             })}
                             rowClassName={(record) => expandedPlanKeys.includes(record.key)
                                 ? "plan-root-row plan-root-row--expanded"
@@ -1228,7 +1420,7 @@ const ТөлөвлөгөөTable = () => {
                 open={Boolean(structureModalMode)}
                 onCancel={() => setStructureModalMode("")}
                 onOk={createDestinationBasket}
-                okText="Үүсгээд сонгох"
+                okText="Үүсгэх"
                 cancelText="Болих"
                 confirmLoading={structureLoading}
                 okButtonProps={{ disabled: !newBasketName.trim() }}
@@ -1265,8 +1457,22 @@ const ТөлөвлөгөөTable = () => {
                 centered
                 destroyOnHidden
             >
+                <div className="plan-tender-modal__context">
+                    <div>
+                        <Text type="secondary">Төлөвлөгөө</Text>
+                        <Text strong>{currentPlan?.plan_name || "—"}</Text>
+                    </div>
+                    <Space wrap size={[6, 6]}>
+                        {(currentPlan?.tenders || []).map((tender) => (
+                            <Tag key={tender.tender_id || getTenderLabel(tender)} color="purple" icon={<CheckCircleOutlined />}>
+                                {getTenderLabel(tender)}
+                            </Tag>
+                        ))}
+                        <Tag color="green">{currentPlan?.available_basket_count || 0} багц боломжтой</Tag>
+                    </Space>
+                </div>
                 <Input
-                    placeholder="Тендерийн дугаар"
+                    placeholder={currentPlan?.tender_count > 0 ? "Шинэ тендерийн дугаар" : "Тендерийн дугаар"}
                     value={tenderNumber}
                     onChange={(event) => setTenderNumber(event.target.value)}
                     style={{ marginBottom: 14 }}

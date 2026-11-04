@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Dropdown, Empty, Popconfirm, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Dropdown, Empty, Modal, Space, Table, Tag, Typography, message } from "antd";
 import {
     FileTextOutlined,
     MoreOutlined,
@@ -33,17 +33,17 @@ const openDocument = (baseUrl, path) => {
     window.open(`${baseUrl}/${normalize(path).replace(/^\//, "")}`, "_blank", "noopener,noreferrer");
 };
 
-const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, onReturnToMyBasket }) => {
+const ТөлөвлөгөөItemDetails = ({
+    data = [],
+    branches = [],
+    onChanged,
+    onReturnToMyBasket,
+    onReturnWholeBasket,
+}) => {
     const [tableData, setTableData] = useState(data);
     const [expandedKeys, setExpandedKeys] = useState([]);
-    const [deletingKey, setDeletingKey] = useState("");
-    const user = useMemo(() => {
-        try {
-            return JSON.parse(localStorage.getItem("data") || "{}");
-        } catch {
-            return {};
-        }
-    }, []);
+    const [returnRecord, setReturnRecord] = useState(null);
+    const [returningMode, setReturningMode] = useState("");
 
     useEffect(() => setTableData(data), [data]);
 
@@ -83,58 +83,108 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, 
         }));
     }, [tableData]);
 
-    const handleDelete = async (record) => {
-        setDeletingKey(record.key);
+    const returnOrderToMyBasket = async (record) => {
+        setReturningMode("single");
         try {
             const ids = record.items
                 .map((item) => unwrap(item.BasketItemId) || item.basket_item_id || item.id)
                 .filter(Boolean);
-            if (!ids.length) throw new Error("Багцын мөрийн дугаар олдсонгүй");
+            if (!ids.length) throw new Error("Захиалгын мөрийн дугаар олдсонгүй");
+            if (!onReturnToMyBasket) throw new Error("Миний сагс руу буцаах үйлдэл тохируулагдаагүй байна");
 
-            if (onReturnToMyBasket) {
-                await onReturnToMyBasket(ids);
-            } else {
-                throw new Error("Миний сагс руу буцаах үйлдэл тохируулагдаагүй байна");
-            }
-            const deletedIds = new Set(ids.map(String));
-            const remainingItems = tableData.filter((item) => !deletedIds.has(String(
+            await onReturnToMyBasket(ids);
+            const returnedIds = new Set(ids.map(String));
+            setTableData((currentItems) => currentItems.filter((item) => !returnedIds.has(String(
                 unwrap(item.BasketItemId) || item.basket_item_id || item.id
-            )));
-            setTableData(remainingItems);
+            ))));
             setExpandedKeys((keys) => keys.filter((key) => key !== record.key));
             await onChanged?.();
-            message.success("Захиалгыг Миний сагс → Багцлаагүй хэсэгт буцаалаа");
+            setReturnRecord(null);
+            message.success("Сонгосон захиалгыг Миний сагс → Багцалсан хэсэгт буцаалаа");
         } catch (error) {
-            console.error("Plan item return failed:", error);
+            console.error("Plan order return failed:", error);
             const responseData = error.response?.data;
             const responseMessage = typeof responseData === "string"
                 ? responseData
                 : responseData?.message || responseData?.error;
             message.error(responseMessage || error.message || "Захиалга буцаахад алдаа гарлаа");
         } finally {
-            setDeletingKey("");
+            setReturningMode("");
+        }
+    };
+
+    const returnWholeBasket = async () => {
+        if (!onReturnWholeBasket) {
+            message.error("Багцыг бүхлээр нь буцаах үйлдэл тохируулагдаагүй байна");
+            return;
+        }
+        setReturningMode("all");
+        try {
+            const succeeded = await onReturnWholeBasket();
+            if (succeeded !== false) setReturnRecord(null);
+        } finally {
+            setReturningMode("");
         }
     };
 
     const itemColumns = [
-        { title: "№", key: "index", width: 48, align: "center", render: (_, __, index) => index + 1 },
-        { title: "Барааны нэр", dataIndex: "cr4name", key: "cr4name", width: 190, ellipsis: true },
-        { title: "Марк", dataIndex: "crmarkname", key: "crmarkname", width: 170, ellipsis: true },
-        { title: "Зургийн №", dataIndex: "zno", key: "zno", width: 105, ellipsis: true },
-        { title: "Нэгж", dataIndex: "usize", key: "usize", width: 90 },
-        { title: "Брэнд", dataIndex: "crbrandname", key: "crbrandname", width: 130, ellipsis: true },
-        { title: "Хэмжих нэгж", dataIndex: "mname", key: "mname", width: 115 },
-        { title: "Код", dataIndex: "code", key: "code", width: 165, render: formatCposCode },
+        { title: "№", key: "index", width: "4%", align: "center", render: (_, __, index) => index + 1 },
         {
-            title: "Тоо × Нэгж үнэ = Нийт",
+            title: "Бараа / Код",
+            key: "product",
+            width: "24%",
+            render: (_, item) => (
+                <Space direction="vertical" size={1} className="plan-order-product-cell">
+                    <Text strong ellipsis={{ tooltip: item.cr4name }}>{normalize(item.cr4name) || "-"}</Text>
+                    <Text type="secondary" copyable={item.code ? { text: normalize(item.code) } : false}>
+                        {formatCposCode(item.code)}
+                    </Text>
+                </Space>
+            ),
+        },
+        {
+            title: "Марк / Брэнд",
+            key: "modelBrand",
+            width: "20%",
+            render: (_, item) => (
+                <Space direction="vertical" size={1} className="plan-order-product-cell">
+                    <Text ellipsis={{ tooltip: item.crmarkname }}>{normalize(item.crmarkname) || "-"}</Text>
+                    <Text type="secondary" ellipsis={{ tooltip: item.crbrandname }}>
+                        {normalize(item.crbrandname) || "Брэндгүй"}
+                    </Text>
+                </Space>
+            ),
+        },
+        {
+            title: "Зураг / Нэгж",
+            key: "drawingUnit",
+            width: "15%",
+            render: (_, item) => (
+                <Space direction="vertical" size={1}>
+                    <Text>{normalize(item.zno) || "Зураггүй"}</Text>
+                    <Text type="secondary">{normalize(item.usize) || "Нэгжгүй"}</Text>
+                </Space>
+            ),
+        },
+        {
+            title: "Хэмжих нэгж",
+            dataIndex: "mname",
+            key: "mname",
+            width: "12%",
+            render: (value) => normalize(value) || "-",
+        },
+        {
+            title: "Тоо хэмжээ / Үнэ",
             key: "calculation",
-            width: 300,
+            width: "25%",
             align: "right",
             render: (_, item) => (
-                <Text style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                    {formatNumber(item.qty)} × {formatNumber(item.price)} ₮ ={" "}
-                    <Text strong style={{ color: "#389e0d" }}>{itemTotal(item).toLocaleString()} ₮</Text>
-                </Text>
+                <div className="plan-order-calculation">
+                    <Text type="secondary">
+                        {formatNumber(item.qty)} × {formatNumber(item.price)} ₮
+                    </Text>
+                    <Text strong>{itemTotal(item).toLocaleString()} ₮</Text>
+                </div>
             ),
         },
     ];
@@ -144,23 +194,23 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, 
             title: "Барааны нэр",
             dataIndex: "cr4name",
             key: "cr4name",
-            width: 230,
+            width: "25%",
             render: (value, record) => (
-                <Space direction="vertical" size={2}>
-                    <Text strong>{value}</Text>
+                <Space direction="vertical" size={2} className="plan-order-product-cell">
+                    <Text strong ellipsis={{ tooltip: value }}>{value}</Text>
                     <Space size={5} wrap>
                         {record.crmarkname && <Text type="secondary">{record.crmarkname}</Text>}
                         {record.items.length > 1 && <Tag color="green">{record.items.length} захиалга нэгтгэсэн</Tag>}
                     </Space>
+                    <Text type="secondary">{formatCposCode(record.code)}</Text>
                 </Space>
             ),
         },
-        { title: "Код", dataIndex: "code", key: "code", width: 165, render: formatCposCode },
         {
             title: "Захиалгын багц",
             dataIndex: "packageNames",
             key: "packageNames",
-            width: 220,
+            width: "17%",
             ellipsis: true,
             render: (values) => values.join(", ") || "-",
         },
@@ -168,24 +218,24 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, 
             title: "Алба",
             dataIndex: "departments",
             key: "departments",
-            width: 180,
+            width: "15%",
             ellipsis: true,
             render: (values) => values.map((value) => branchMap.get(value) || value).join(", ") || "-",
         },
-        { title: "Тоо хэмжээ", dataIndex: "quantity", key: "quantity", width: 110, align: "right", render: formatNumber },
-        { title: "Нэгж үнэ", dataIndex: "price", key: "price", width: 125, align: "right", render: (value) => `${formatNumber(value)} ₮` },
+        { title: "Тоо хэмжээ", dataIndex: "quantity", key: "quantity", width: "8%", align: "right", render: formatNumber },
+        { title: "Нэгж үнэ", dataIndex: "price", key: "price", width: "11%", align: "right", render: (value) => `${formatNumber(value)} ₮` },
         {
             title: "Нийт үнэ",
             dataIndex: "totalPrice",
             key: "totalPrice",
-            width: 155,
+            width: "12%",
             align: "right",
             render: (value) => <Text strong>{formatNumber(value)} ₮</Text>,
         },
         {
             title: "Үйлдэл",
             key: "actions",
-            width: 115,
+            width: "12%",
             align: "center",
             render: (_, record) => {
                 const menuItems = [
@@ -201,72 +251,112 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, 
                         label: "Техникийн баримт үзэх",
                         onClick: () => openDocument(TECH_BASE_URL, record.techurl),
                     },
+                    (record.planurl || record.techurl) && { type: "divider" },
+                    {
+                        key: "return",
+                        danger: true,
+                        icon: <RollbackOutlined />,
+                        label: "Миний сагс руу буцаах",
+                        onClick: () => setReturnRecord(record),
+                    },
                 ].filter(Boolean);
 
                 return (
-                    <Space>
-                        {menuItems.length > 0 && (
-                            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-                                <Button size="small" icon={<MoreOutlined />}>Баримт</Button>
-                            </Dropdown>
-                        )}
-                        {user?.erh !== "Удирдлага" && (
-                            <Popconfirm
-                                title="Захиалгыг багцаас хасах уу?"
-                                description="Захиалгууд Миний сагс → Багцлаагүй хэсэгт шилжинэ."
-                                onConfirm={() => handleDelete(record)}
-                                okText="Миний сагс руу буцаах"
-                                cancelText="Болих"
-                            >
-                                <Button
-                                    size="small"
-                                    icon={<RollbackOutlined />}
-                                    loading={deletingKey === record.key}
-                                />
-                            </Popconfirm>
-                        )}
-                    </Space>
+                    <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+                        <Button size="small" icon={<MoreOutlined />}>Үйлдэл</Button>
+                    </Dropdown>
                 );
             },
         },
     ];
 
     return (
-        <Table
-            columns={columns}
-            dataSource={groupedData}
-            rowKey="key"
-            size="small"
-            pagination={groupedData.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
-            scroll={{ x: 1180 }}
-            expandable={{
-                expandedRowKeys: expandedKeys,
-                showExpandColumn: false,
-                rowExpandable: (record) => record.items.length > 0,
-                expandedRowRender: (record) => (
-                    <div style={{ padding: "8px 10px 14px" }}>
-                        <Table
-                            columns={itemColumns}
-                            dataSource={record.items}
-                            rowKey="rowKey"
-                            size="small"
-                            pagination={false}
-                            scroll={{ x: 1150 }}
-                        />
-                    </div>
-                ),
-            }}
-            onRow={(record) => ({
-                onClick: (event) => {
-                    if (event.target.closest("button, a, input, .ant-dropdown")) return;
-                    setExpandedKeys((keys) => keys.includes(record.key)
-                        ? keys.filter((key) => key !== record.key)
-                        : [...keys, record.key]);
-                },
-                style: { cursor: "pointer" },
-            })}
-            locale={{ emptyText: <Empty description="Захиалгын багц байхгүй" /> }}
-        />
+        <>
+            <Table
+                className="plan-item-groups-table"
+                columns={columns}
+                dataSource={groupedData}
+                rowKey="key"
+                size="small"
+                pagination={groupedData.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+                expandable={{
+                    expandedRowKeys: expandedKeys,
+                    showExpandColumn: false,
+                    rowExpandable: (record) => record.items.length > 0,
+                    expandedRowRender: (record) => (
+                        <div className="plan-item-lines-panel">
+                            <Table
+                                className="plan-item-lines-table"
+                                columns={itemColumns}
+                                dataSource={record.items}
+                                rowKey="rowKey"
+                                size="small"
+                                pagination={false}
+                            />
+                        </div>
+                    ),
+                }}
+                onRow={(record) => ({
+                    onClick: (event) => {
+                        if (event.target.closest("button, a, input, .ant-dropdown")) return;
+                        setExpandedKeys((keys) => keys.includes(record.key)
+                            ? keys.filter((key) => key !== record.key)
+                            : [...keys, record.key]);
+                    },
+                    style: { cursor: "pointer" },
+                })}
+                locale={{ emptyText: <Empty description="Захиалгын багц байхгүй" /> }}
+            />
+            <Modal
+                open={Boolean(returnRecord)}
+                title="Миний сагс руу буцаах"
+                centered
+                width={560}
+                destroyOnHidden
+                closable={!returningMode}
+                maskClosable={!returningMode}
+                onCancel={() => setReturnRecord(null)}
+                footer={[
+                    <Button key="cancel" disabled={Boolean(returningMode)} onClick={() => setReturnRecord(null)}>
+                        Болих
+                    </Button>,
+                    <Button
+                        key="single"
+                        icon={<RollbackOutlined />}
+                        loading={returningMode === "single"}
+                        disabled={returningMode === "all"}
+                        onClick={() => returnOrderToMyBasket(returnRecord)}
+                    >
+                        Энэ захиалгыг буцаах
+                    </Button>,
+                    <Button
+                        key="all"
+                        type="primary"
+                        danger
+                        icon={<RollbackOutlined />}
+                        loading={returningMode === "all"}
+                        disabled={returningMode === "single"}
+                        onClick={returnWholeBasket}
+                    >
+                        Багцыг бүхлээр нь буцаах
+                    </Button>,
+                ]}
+            >
+                <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    <Text>
+                        <Text strong>{returnRecord?.cr4name || "Сонгосон захиалга"}</Text>-г дангаар нь эсвэл
+                        төлөвлөгөөний багцыг бүхлээр нь буцаах сонголтоо хийнэ үү.
+                    </Text>
+                    <Text type="secondary">
+                        Буцаасан мэдээлэл Миний сагс → Багцалсан хэсэгт шилжинэ.
+                    </Text>
+                    <Space size={8} wrap>
+                        <Tag color="blue">Сонгосон: {returnRecord?.items?.length || 0} мөр</Tag>
+                        <Tag color="gold">Багц бүхэлдээ: {tableData.length} мөр</Tag>
+                    </Space>
+                </Space>
+            </Modal>
+        </>
     );
 };
 
@@ -275,6 +365,7 @@ const ТөлөвлөгөөItemDetails = ({ data = [], branches = [], onChanged, 
     branches: PropTypes.array,
     onChanged: PropTypes.func,
     onReturnToMyBasket: PropTypes.func,
+    onReturnWholeBasket: PropTypes.func,
 };
 
 export default ТөлөвлөгөөItemDetails;

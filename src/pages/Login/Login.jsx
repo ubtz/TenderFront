@@ -18,17 +18,16 @@ import {
     UserOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
 import backgroundImage from "../../assets/background.jpg";
 import brandLockup from "../../assets/ubtz_lockup_white.png";
 import accessRequestPdf from "../../assets/2026.09.10 хэрэглэгч.pdf";
+import { fullReloadTo } from "../../utils/sessionNavigation";
 import "./Login.css";
 
 const rememberedEmail = localStorage.getItem("rememberedLoginEmail") || "";
 
 const Login = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL;
-    const navigate = useNavigate();
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
@@ -64,8 +63,7 @@ const Login = () => {
                 code: response.data.user.code,
                 erh: response.data.user.Erh,
             }));
-            message.success("Амжилттай нэвтэрлээ");
-            navigate("/", { replace: true });
+            fullReloadTo("/");
         } catch (error) {
             console.error("Login failed:", error);
             const serverMessage = error.response?.data?.error;
